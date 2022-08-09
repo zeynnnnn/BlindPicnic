@@ -32,6 +32,14 @@ extern "C" {
 #include <stdint.h>
 #include <stdlib.h>
 
+#if SUPERCOP
+int random_bytes_supercop(uint8_t* buf, size_t len);
+    #define picnic_random_bytes random_bytes_supercop
+#else
+#define PICNIC_BUILD_DEFAULT_RNG 1
+#define picnic_random_bytes random_bytes_default
+#endif
+
 /* Maximum lengths in bytes */
 #define PICNIC_MAX_LOWMC_BLOCK_SIZE 32
 #define PICNIC_MAX_PUBLICKEY_SIZE  (2 * PICNIC_MAX_LOWMC_BLOCK_SIZE + 1)    /**< Largest serialized public key size, in bytes */
@@ -118,7 +126,8 @@ int picnic_keygen(picnic_params_t parameters, picnic_publickey_t* pk,
  */
 int picnic_sign(picnic_privatekey_t* sk, const uint8_t* message, size_t message_len,
                 uint8_t* signature, size_t* signature_len);
-
+int picnic_sign_blinded( picnic_privatekey_t* privatekey, uint8_t * nonce,const  uint8_t* message, size_t message_len,
+                        uint8_t* signature, size_t* signature_len);
 /**
  * Get the number of bytes required to hold a signature.
  *
@@ -134,8 +143,9 @@ int picnic_sign(picnic_privatekey_t* sk, const uint8_t* message, size_t message_
  *
  * @see picnic_sign()
  */
-size_t picnic_signature_size(picnic_params_t parameters);
 
+size_t picnic_signature_size(picnic_params_t parameters);
+size_t picnic_blind_signature_size(picnic_params_t parameters);
 /**
  * Verification function.
  * Verifies a signature is valid with respect to a public key and message.
@@ -153,6 +163,7 @@ size_t picnic_signature_size(picnic_params_t parameters);
  */
 int picnic_verify(picnic_publickey_t* pk, const uint8_t* message, size_t message_len,
                   const uint8_t* signature, size_t signature_len);
+int picnic_verify_blinded(picnic_publickey_t* pk, const uint8_t* message, size_t message_len,  const  uint8_t* signature, size_t signature_len);
 
 /**
  * Serialize a public key.
@@ -224,18 +235,18 @@ int picnic_validate_keypair(const picnic_privatekey_t* privatekey, const picnic_
  * random_bytes_default, and change the definition of
  * picnic_random_bytes.
  */
-#if SUPERCOP
-int random_bytes_supercop(uint8_t* buf, size_t len);
-    #define picnic_random_bytes random_bytes_supercop
-#else
-    #define PICNIC_BUILD_DEFAULT_RNG 1
-    #define picnic_random_bytes random_bytes_default
-#endif
 
 
 /** Parse the signature and print the individual parts. Used when creating test vectors */
 void print_signature(const uint8_t* sigBytes, size_t sigBytesLen, picnic_params_t picnic_params);
 
+int picnic_blind_pk(picnic_params_t parameters,  picnic_privatekey_t* skBlinded, picnic_publickey_t* pk, picnic_publickey_t* pkBlinded,
+                    uint8_t * nonce);
+int picnic_validate_blind_keypair( const picnic_publickey_t* publickey, const picnic_privatekey_t* skBlind, const picnic_publickey_t* pkBlind);
+int picnic_keygen_blinded(picnic_params_t parameters, picnic_publickey_t* pk,
+                          picnic_privatekey_t* privatekey);
+int KDF(uint32_t  stateSizeBytes,uint8_t * pkCiphertext,uint8_t* nonce,  uint8_t* skData);
+int getPicnic_random_bytes( uint8_t* buf, size_t len);
 #ifdef __cplusplus
 }
 #endif

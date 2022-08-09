@@ -38,6 +38,7 @@ typedef Keccak_HashInstance HashInstance;
 void HashUpdate(HashInstance* ctx, const uint8_t* data, size_t byteLen);
 
 void HashInit(HashInstance* ctx, paramset_t* params, uint8_t hashPrefix);
+void HashInitBlind(HashInstance* ctx, uint32_t  stateSizeBytes, uint8_t hashPrefix);
 
 void HashFinal(HashInstance* ctx);
 

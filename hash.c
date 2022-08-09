@@ -41,6 +41,19 @@ void HashInit(HashInstance* ctx, paramset_t* params, uint8_t hashPrefix)
         HashUpdate(ctx, &hashPrefix, 1);
     }
 }
+void HashInitBlind(HashInstance* ctx, uint32_t stateSizeBits, uint8_t hashPrefix)
+{
+    if (stateSizeBits == 128 || stateSizeBits == 129) {
+        Keccak_HashInitialize_SHAKE128(ctx);    /* L1 */
+    }
+    else {
+        Keccak_HashInitialize_SHAKE256(ctx);    /* L3, L5 */
+    }
+
+    if (hashPrefix != HASH_PREFIX_NONE) {
+        HashUpdate(ctx, &hashPrefix, 1);
+    }
+}
 
 void HashFinal(HashInstance* ctx)
 {

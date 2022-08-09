@@ -17,6 +17,137 @@
 
 #define MSG_LEN 500
 
+int picnicBlindExample(picnic_params_t parameters)
+{
+    picnic_publickey_t pk;
+    picnic_privatekey_t sk;
+    picnic_privatekey_t skBlind;
+    picnic_publickey_t pkBlind;
+    uint8_t nonce[PICNIC_MAX_PUBLICKEY_SIZE / 2];
+
+    printf("Picnic Blind example with parameter set: %s\n", picnic_get_param_name(parameters) );
+
+    fprintf(stdout, "Generating key... ");
+    fflush(stdout);
+    int ret  = picnic_keygen_blinded(parameters, &pk, &sk);
+
+    if (ret != 0) {
+        printf("picnic_blind_keygen failed\n");
+        exit(-1);
+    }
+    printf(" success\n");
+    //NONCE SET RANDOM
+    getPicnic_random_bytes( nonce, sizeof (nonce));
+
+    ret = picnic_blind_pk(parameters,&skBlind,&pk,  &pkBlind,nonce);
+    if (ret != EXIT_SUCCESS) {
+        printf("picnic_key blinding failed\n");
+        exit(-1);
+    }
+    printf(" success\n");
+
+    ret = picnic_validate_blind_keypair(&pk,&skBlind, &pkBlind);
+    if (ret != 0) {
+        printf("Blinded Keypair invalid after deserializing private key\n");
+        exit(-1);
+    }
+    printf(" success\n");
+
+    uint8_t message[MSG_LEN];
+    memset(message, 0x01, sizeof(message));
+    uint8_t* signature = NULL;
+
+    size_t signature_len = picnic_blind_signature_size(parameters);
+    signature = (uint8_t*)malloc(signature_len);
+    if (signature == NULL) {
+        printf("failed to allocate signature\n");
+        exit(-1);
+    }
+    fprintf(stdout, "Max signature length %" PRIuPTR " bytes\n", signature_len);
+
+    fprintf(stdout, "Signing a %d byte message... ", MSG_LEN);
+    fflush(stdout);
+
+    ret = picnic_sign_blinded(&sk,nonce, message, sizeof(message), signature, &signature_len);
+
+    if (ret != 0) {
+        printf("picnic_blind_sign failed\n");
+        exit(-1);
+    }
+    printf(" success, signature is %d bytes\n", (int)signature_len);
+
+    /* signature_len has the exact number of bytes used */
+    if (signature_len < picnic_blind_signature_size(parameters)) {
+        uint8_t* newsig = realloc(signature, signature_len);
+        if (newsig == NULL) {
+            printf("failed to re-size signature\n");
+            /* Not an error, we can continue with signature */
+        }
+        else {
+            signature = newsig;
+        }
+    }
+
+    fprintf(stdout, "Verifying signature... ");
+    fflush(stdout);
+
+    ret = picnic_verify_blinded(&pkBlind, message, sizeof(message), signature, signature_len);
+
+    if (ret != 0) {
+        printf("picnic_blind_verify failed\n");
+        exit(-1);
+    }
+    printf(" success\n");
+
+    printf("Testing public key serialization... ");
+    uint8_t pk_buf[PICNIC_MAX_PUBLICKEY_SIZE];
+    ret = picnic_write_public_key(&pk, pk_buf, sizeof(pk_buf));
+    if (ret <= 0) {
+        printf("Failed to serialize public key\n");
+        exit(-1);
+    }
+
+    memset(&pk, 0x00, sizeof(picnic_publickey_t));
+
+    ret = picnic_read_public_key(&pk, pk_buf, sizeof(pk_buf));
+    if (ret != 0) {
+        printf("Failed to read public key\n");
+        exit(-1);
+    }
+
+    ret = picnic_verify(&pk, message, sizeof(message), signature, signature_len);
+    if (ret != 0) {
+        printf("picnic_verify failed after de-serializing public key\n");
+        exit(-1);
+    }
+    printf(" success\n");
+
+    printf("Testing private key serialization... ");
+    uint8_t sk_buf[PICNIC_MAX_PRIVATEKEY_SIZE];
+    ret = picnic_write_private_key(&sk, sk_buf, sizeof(sk_buf));
+    if (ret <= 0) {
+        printf("Failed to write private key\n");
+        exit(-1);
+    }
+
+    memset(&sk, 0x00, sizeof(picnic_privatekey_t));
+    ret = picnic_read_private_key(&sk, sk_buf, sizeof(sk_buf));
+    if (ret != 0) {
+        printf("Failed to read private key\n");
+        exit(-1);
+    }
+
+    ret = picnic_validate_keypair(&sk, &pk);
+    if (ret != 0) {
+        printf("Keypair invalid after deserializing private key\n");
+        exit(-1);
+    }
+    printf(" success\n\n");
+
+    free(signature);
+
+    return 0;
+}
 int picnicExample(picnic_params_t parameters)
 {
     picnic_publickey_t pk;
@@ -132,11 +263,13 @@ int main(int argc, char** argv)
 {
 
     if (argc > 1) {
-        picnicExample(atoi(argv[1]));
+        //picnicExample(atoi(argv[1]));
+        picnicBlindExample(atoi(argv[1]));
         return 0;
     }
 
     for (picnic_params_t params = 1; params < PARAMETER_SET_MAX_INDEX; params++) {
-        picnicExample(params);
+        //picnicExample(params);
+        picnicBlindExample(params);
     }
 }

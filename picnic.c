@@ -19,7 +19,8 @@
 #include "picnic_types.h"
 #include "lowmc_constants.h"
 #include "platform.h"
-
+#include "hash.h"
+#include <openssl/evp.h>
 static int is_valid_params(picnic_params_t params)
 {
     if (params > 0 && params < PARAMETER_SET_MAX_INDEX) {
@@ -198,6 +199,22 @@ int get_param_set(picnic_params_t picnicParams, paramset_t* paramset)
 
     return EXIT_SUCCESS;
 }
+int KDF(uint32_t  stateSizeBytes,uint8_t * pkCiphertext,uint8_t* nonce,  uint8_t* skData)
+{
+    int success = -1;
+
+    HashInstance ctx;
+    HashInitBlind(&ctx, stateSizeBytes, HASH_PREFIX_NONE);
+    HashUpdate(&ctx, (uint8_t*)pkCiphertext, stateSizeBytes);
+    HashUpdate(&ctx, (uint8_t*)nonce, stateSizeBytes);
+    HashUpdate(&ctx, (uint8_t*)skData, stateSizeBytes);
+    HashUpdateIntLE(&ctx, stateSizeBytes);
+    HashFinal(&ctx);
+    //HashSqueeze(&ctx, saltAndRoot, saltAndRootLength);
+
+
+    return success;
+}
 
 int picnic_keygen(picnic_params_t parameters, picnic_publickey_t* pk,
                   picnic_privatekey_t* sk)
@@ -253,7 +270,116 @@ int picnic_keygen(picnic_params_t parameters, picnic_publickey_t* pk,
     return 0;
 }
 
+int picnic_keygen_blinded(picnic_params_t parameters, picnic_publickey_t* pk,
+                          picnic_privatekey_t* privatekey){
+    return picnic_keygen(parameters, pk, privatekey);
+}
+int getPicnic_random_bytes( uint8_t* buf, size_t len){
+    if (picnic_random_bytes(buf,len)!= 0) {
+        printf(("Failed to generate random bytes for nonce\n"));
+        return -1;
+    }
+    return 0;
+}
 
+int picnic_blind_pk(picnic_params_t parameters, picnic_privatekey_t* skBlinded, picnic_publickey_t* pk, picnic_publickey_t* pkBlinded,
+                    uint8_t * nonce){
+
+    if (!is_valid_params(parameters)) {
+        printf("Invalid parameter set\n");
+        return -1;
+    }
+
+    if (pkBlinded == NULL) {
+        printf("pk blinded key is NULL\n");
+        return -1;
+    }
+
+    memset(pkBlinded, 0x00, sizeof(picnic_publickey_t));
+    memset(skBlinded, 0x00, sizeof(picnic_privatekey_t));
+
+    paramset_t paramset;
+
+    int ret = get_param_set(parameters, &paramset);
+
+    if (ret != EXIT_SUCCESS) {
+        fprintf(stderr, "Failed to initialize LowMC parameters\n");
+        return -1;
+    }
+
+
+    //fprintf(stderr, "\nNonce: %p\n", nonce->noncedata);
+/* Generate a private key  from public key pk and nonce */
+    skBlinded->params = parameters;
+    pkBlinded->params = parameters;
+//KDF to derive new skblind from pk.cipher and nonce
+    KDF(paramset.stateSizeBytes, pk->ciphertext , nonce, skBlinded->data) ;
+    zeroTrailingBits(skBlinded->data, paramset.stateSizeBits);
+
+/* Compute the blinded ciphertext from pk to use as blindedpk */
+    LowMCEnc((uint32_t*)pk->ciphertext, (uint32_t*)pkBlinded->ciphertext,
+             (uint32_t*)skBlinded->data, &paramset);
+    //zeroTrailingBits(pkBlinded->plaintext, paramset.stateSizeBits);
+
+    memcpy(pkBlinded->plaintext , pk->plaintext,paramset.stateSizeBytes );
+    memcpy(&(skBlinded->pk), pkBlinded, sizeof(picnic_publickey_t));
+    printf("\n ciphertext of pk:\n");
+    for(uint j = 0; j < sizeof(pk->ciphertext); j++) {
+        printf("%hhu ", pk->ciphertext[j]);
+    }
+
+    printf("\nBlind ciphertext of skBlinded->pk.ciphertext:\n");
+    for(uint j = 0; j < sizeof(skBlinded->pk.ciphertext); j++) {
+        printf("%hhu ", skBlinded->pk.ciphertext[j]);
+    }
+    return 0;
+
+
+}
+int picnic_validate_blind_keypair( const picnic_publickey_t* publickey, const picnic_privatekey_t* skBlind, const picnic_publickey_t* pkBlind){
+    paramset_t *paramset= malloc(sizeof(paramset_t));
+
+    int ret = get_param_set(publickey->params, paramset);
+
+    if (ret != EXIT_SUCCESS) {
+        fprintf(stderr, "Failed to initialize LowMC parameters\n");
+        return -1;
+    }
+    if (skBlind == NULL || publickey == NULL) {
+        fprintf(stderr, "Given private blind OR public key are NULL\n");
+        return -1;
+    }
+
+    if (skBlind->params != publickey->params) {
+        fprintf(stderr, "Given private blind OR piblic params are not matching\n");
+        return -1;
+    }
+
+    if (!is_valid_params(skBlind->params)) {
+        fprintf(stderr, "Unsupported parameter set\n");
+        return -1;
+    }
+
+    /* Re-compute the ciphertext and compare to the value in the public key. */
+    uint8_t ciphertext[sizeof(publickey->ciphertext)];
+    uint8_t plaintext[sizeof(publickey->ciphertext)];
+
+    memset(ciphertext, 0x00, sizeof(ciphertext));
+    memset(plaintext, 0x00, sizeof(plaintext));
+
+    memcpy(plaintext,publickey->ciphertext,sizeof(publickey->ciphertext) );
+    //zeroTrailingBits(plaintext, paramset->stateSizeBits);
+    LowMCEnc((uint32_t*)plaintext, (uint32_t*)ciphertext, (uint32_t*)skBlind->data, paramset);
+
+    if (memcmp(ciphertext, pkBlind->ciphertext, sizeof(ciphertext)) != 0) {
+        fprintf(stderr, "created Pubkey ciphertext is not same with  given blinded ciphertext \n");
+        return -1;
+    }
+
+
+    printf("Valid blind-key pair\n");
+    return 0;
+}
 int is_picnic3(picnic_params_t params)
 {
     if (params == Picnic3_L1 ||
@@ -333,7 +459,123 @@ int picnic_sign(picnic_privatekey_t* sk, const uint8_t* message, size_t message_
 
     return 0;
 }
+int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* message, size_t message_len,
+                uint8_t* signature, size_t* signature_len)
+{
+    int ret;
+    paramset_t paramset;
+    printf("Nonce:%s",nonce);
+    ret = get_param_set(sk->params, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize parameter set\n"));
+        return -1;
+    }
 
+    if (!is_picnic3(sk->params)) {
+        signature_t* sig = (signature_t*)malloc(sizeof(signature_t));
+        allocateSignature(sig, &paramset);
+        if (sig == NULL) {
+            return -1;
+        }
+
+        ret = sign_picnic1((uint32_t*)sk->data, (uint32_t*)sk->pk.ciphertext, (uint32_t*)sk->pk.plaintext, message,
+                           message_len, sig, &paramset);
+        if (ret != EXIT_SUCCESS) {
+            PRINT_DEBUG(("Failed to create signature\n"));
+            freeSignature(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+
+        ret = serializeSignature(sig, signature, *signature_len, &paramset);
+        if (ret == -1) {
+            PRINT_DEBUG(("Failed to serialize signature\n"));
+            freeSignature(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+        *signature_len = ret;
+        freeSignature(sig, &paramset);
+        free(sig);
+    }
+    else {
+        signature2_t* sig = (signature2_t*)malloc(sizeof(signature2_t));
+        allocateSignature2(sig, &paramset);
+        if (sig == NULL) {
+            return -1;
+        }
+        ret = sign_picnic3((uint32_t*)sk->data, (uint32_t*)sk->pk.ciphertext, (uint32_t*)sk->pk.plaintext, message,
+                           message_len, sig, &paramset);
+        if (ret != EXIT_SUCCESS) {
+            PRINT_DEBUG(("Failed to create signature\n"));
+            freeSignature2(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+        ret = serializeSignature2(sig, signature, *signature_len, &paramset);
+        if (ret == -1) {
+            PRINT_DEBUG(("Failed to serialize signature\n"));
+            fflush(stderr);
+            freeSignature2(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+        *signature_len = ret;
+
+        freeSignature2(sig, &paramset);
+        free(sig);
+    }
+
+    return 0;
+}
+
+size_t picnic_blind_signature_size(picnic_params_t parameters) //TODO
+{
+    paramset_t paramset;
+
+    int ret = get_param_set(parameters, &paramset);
+
+    if (ret != EXIT_SUCCESS) {
+        return PICNIC_MAX_SIGNATURE_SIZE;
+    }
+
+    /* Picnic3 parameter sets */
+    if (parameters == Picnic3_L1 ||
+        parameters == Picnic3_L3 ||
+        parameters == Picnic3_L5 ) {
+
+        size_t u = paramset.numOpenedRounds;
+        size_t T = paramset.numMPCRounds;
+        size_t numTreeValues = u * ceil_log2((T + (u - 1)) / u);                        // u*ceil(log2(ceil(T/u)))
+
+        size_t proofSize =   paramset.seedSizeBytes * ceil_log2(paramset.numMPCParties) // Info to recompute seeds
+                             + paramset.andSizeBytes + paramset.stateSizeBytes            // circuit size, size of aux info
+                             + paramset.digestSizeBytes                                   // size of commitment of unopened party
+                             + paramset.stateSizeBytes                                    // masked input
+                             + paramset.andSizeBytes;                                     //size of broadcast messages
+
+        size_t signatureSize =   paramset.saltSizeBytes                                 // salt
+                                 + paramset.digestSizeBytes                               // challenge hash
+                                 + numTreeValues * paramset.seedSizeBytes                 // iSeed info
+                                 + numTreeValues * paramset.digestSizeBytes               // commitment opening info for views
+                                 + proofSize * u;                                         // one proof per challenged execution
+        return signatureSize;
+    }
+
+    /* Other paramter sets */
+    //TODO
+    // For input blind share 2* lowmcparams.stateSizeBytes
+    // 2* 2 *numBytes(3 * lowmcparams.numSboxes * lowmcparams.numRounds)
+    switch (paramset.transform) {
+        case TRANSFORM_FS:
+            // This is the largest possible FS signature size and would result when no challenges are 0 -- which would require us to include stateSizeBytes for every ZKB round.
+            return paramset.numMPCRounds * (paramset.digestSizeBytes + paramset.stateSizeBytes + numBytes(3 * paramset.numSboxes * paramset.numRounds) +  2 * paramset.seedSizeBytes) + numBytes(2 * paramset.numMPCRounds) + paramset.saltSizeBytes;
+        case TRANSFORM_UR:
+            return paramset.numMPCRounds * (paramset.digestSizeBytes + paramset.stateSizeBytes + 2 * numBytes(3 * paramset.numSboxes * paramset.numRounds) +  3 * paramset.seedSizeBytes) + numBytes(2 * paramset.numMPCRounds) + paramset.saltSizeBytes;
+        default:
+            return PICNIC_MAX_SIGNATURE_SIZE;
+    }
+}
 size_t picnic_signature_size(picnic_params_t parameters)
 {
     paramset_t paramset;
@@ -380,6 +622,79 @@ size_t picnic_signature_size(picnic_params_t parameters)
 }
 
 int picnic_verify(picnic_publickey_t* pk, const uint8_t* message, size_t message_len,
+                  const uint8_t* signature, size_t signature_len)
+{
+    int ret;
+
+    paramset_t paramset;
+
+    ret = get_param_set(pk->params, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize parameter set\n"));
+        return -1;
+    }
+
+    if (!is_picnic3(pk->params)) {
+        signature_t* sig = (signature_t*)malloc(sizeof(signature_t));
+        allocateSignature(sig, &paramset);
+        if (sig == NULL) {
+            return -1;
+        }
+
+        ret = deserializeSignature(sig, signature, signature_len, &paramset);
+        if (ret != EXIT_SUCCESS) {
+            PRINT_DEBUG(("Failed to deserialize signature\n"));
+            freeSignature(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+
+        ret = verify(sig, (uint32_t*)pk->ciphertext,
+                     (uint32_t*)pk->plaintext, message, message_len, &paramset);
+        if (ret != EXIT_SUCCESS) {
+            /* Signature is invalid, or verify function failed */
+            freeSignature(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+
+        freeSignature(sig, &paramset);
+        free(sig);
+    }
+    else {
+        signature2_t* sig = (signature2_t*)malloc(sizeof(signature2_t));
+        allocateSignature2(sig, &paramset);
+        if (sig == NULL) {
+            return -1;
+        }
+
+        ret = deserializeSignature2(sig, signature, signature_len, &paramset);
+        if (ret != EXIT_SUCCESS) {
+            PRINT_DEBUG(("Failed to deserialize signature\n"));
+            freeSignature2(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+
+        ret = verify_picnic3(sig, (uint32_t*)pk->ciphertext,
+                             (uint32_t*)pk->plaintext, message, message_len, &paramset);
+        if (ret != EXIT_SUCCESS) {
+            /* Signature is invalid, or verify function failed */
+            freeSignature2(sig, &paramset);
+            free(sig);
+            return -1;
+        }
+
+        freeSignature2(sig, &paramset);
+        free(sig);
+    }
+
+
+    return 0;
+}
+
+
+int picnic_verify_blinded(picnic_publickey_t* pk, const uint8_t* message, size_t message_len,
                   const uint8_t* signature, size_t signature_len)
 {
     int ret;
