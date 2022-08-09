@@ -380,6 +380,71 @@ static void setAuxBits(randomTape_t* tapes, uint8_t* input, paramset_t* params)
     }
 }
 
+static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, shares_t* tmp_shares,
+                          msgs_t* msgs, const uint32_t* plaintext, const uint32_t* pubKey, paramset_t* params,uint32_t* blindPubKey,uint32_t* blindMaskedKey)
+{
+    int ret = 0;
+    uint32_t roundKey[LOWMC_MAX_WORDS] = {0};
+    uint32_t state[LOWMC_MAX_WORDS] = {0};
+
+    matrix_mul(roundKey, maskedKey, KMatrix(0, params), params);        // roundKey = maskedKey * KMatrix[0]
+    xor_array(state, roundKey, plaintext, params->stateSizeWords);      // state = plaintext + roundKey
+
+    for (uint32_t r = 1; r <= params->numRounds; r++) {
+        tapesToWords(tmp_shares, tapes);
+        mpc_sbox(state, tmp_shares, tapes, msgs, params);
+        matrix_mul(state, state, LMatrix(r - 1, params), params);       // state = state * LMatrix (r-1)
+        xor_array(state, state, RConstant(r - 1, params), params->stateSizeWords);  // state += RConstant
+        matrix_mul(roundKey, maskedKey, KMatrix(r, params), params);
+        xor_array(state, roundKey, state, params->stateSizeWords);      // state += roundKey
+    }
+
+    printHex("@Simulate_Online ciphertext (y) from pk:", (uint8_t*)state, params->stateSizeBytes);
+
+    if(memcmp(state, pubKey, params->stateSizeBytes) != 0) {
+#ifdef DEBUG
+        printf("%s: output does not match pubKey\n", __func__);
+        printHex("pubKey", (uint8_t*)pubKey, params->stateSizeBytes);
+        printHex("output", (uint8_t*)state, params->stateSizeBytes);
+#endif
+        ret = -1;
+        printf("Failed in first comparison for state pubkey!");
+        goto Exit;
+    }
+    //memset(roundKey,0,LOWMC_MAX_WORDS);
+    tapes->pos = 0;
+    for (uint i = 0; i < LOWMC_MAX_WORDS; i++) {
+        roundKey[i] =0;
+    }
+
+
+    matrix_mul(roundKey, blindMaskedKey, KMatrix(0, params), params);        // roundKey = maskedKey * KMatrix[0]
+    xor_array(state, roundKey, state, params->stateSizeWords);      // state = plaintext(state) + roundKey
+
+    for (uint32_t r = 1; r <= params->numRounds; r++) {
+        tapesToWords(tmp_shares, tapes);
+        mpc_sbox(state, tmp_shares, tapes, msgs, params);
+        matrix_mul(state, state, LMatrix(r - 1, params), params);       // state = state * LMatrix (r-1)
+        xor_array(state, state, RConstant(r - 1, params), params->stateSizeWords);  // state += RConstant
+        matrix_mul(roundKey, blindMaskedKey, KMatrix(r, params), params);
+        xor_array(state, roundKey, state, params->stateSizeWords);      // state += roundKey
+    }
+    if(memcmp(state, blindPubKey, params->stateSizeBytes) != 0) {
+        printf("Failed in second comparison for state blindpubkey!");
+#ifdef DEBUG
+        printf("%s: Blindoutput does not match pubKey\n", __func__);
+        printHex("pubKey", (uint8_t*)blindPubKey, params->stateSizeBytes);
+        printHex("output", (uint8_t*)state, params->stateSizeBytes);
+#endif
+        ret = -1;
+        goto Exit;
+    }
+
+    printHex("Simulate Online ciphertext (z) from pkblind:", (uint8_t*)state, params->stateSizeBytes);
+    Exit:
+    return ret;
+}
+
 static int simulateOnline(uint32_t* maskedKey, randomTape_t* tapes, shares_t* tmp_shares,
                            msgs_t* msgs, const uint32_t* plaintext, const uint32_t* pubKey, paramset_t* params)
 {
@@ -1056,5 +1121,163 @@ int serializeSignature2(const signature2_t* sig, uint8_t* sigBytes, size_t sigBy
     }
 
     return (int)(sigBytes - sigBytesBase);
+}
+
+
+int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, const uint8_t* message,
+                 size_t messageByteLength, signature2_t* sig, paramset_t* params,uint32_t* blindPrivateKey, uint32_t* blindPubKey)
+{
+    int ret = 0;
+    tree_t* treeCv = NULL;
+    commitments_t Ch = {0};
+    commitments_t Cv = {0};
+    uint8_t* saltAndRoot = malloc(params->saltSizeBytes + params->seedSizeBytes);
+
+    computeSaltAndRootSeed(saltAndRoot, params->saltSizeBytes + params->seedSizeBytes, privateKey, pubKey, plaintext, message, messageByteLength, params);
+    memcpy(sig->salt, saltAndRoot, params->saltSizeBytes);
+    tree_t* iSeedsTree = generateSeeds(params->numMPCRounds, saltAndRoot + params->saltSizeBytes, sig->salt, 0, params);
+    uint8_t** iSeeds = getLeaves(iSeedsTree);
+    free(saltAndRoot);
+
+    randomTape_t* tapes = malloc(params->numMPCRounds * sizeof(randomTape_t));
+    tree_t** seeds = malloc(params->numMPCRounds * sizeof(tree_t*));
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        seeds[t] = generateSeeds(params->numMPCParties, iSeeds[t], sig->salt, t, params);
+        createRandomTapes(&tapes[t], getLeaves(seeds[t]), sig->salt, t, params);
+    }
+
+    /* Preprocessing; compute aux tape for the N-th player, for each parallel rep */
+    inputs_t inputs = allocateInputs(params);
+    inputs_t inputsBlind = allocateInputs(params);
+    uint8_t auxBits[MAX_AUX_BYTES] = {0,};
+    uint8_t auxBitsBlind[MAX_AUX_BYTES] = {0,};
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        computeAuxTape(&tapes[t], inputs[t], params);
+    }
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        computeAuxTape(&tapes[t], inputsBlind[t], params);
+    }
+    /* Commit to seeds and aux bits */
+    commitments_t* C = allocateCommitments(params, 0);
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        for (size_t j = 0; j < params->numMPCParties - 1; j++) {
+            commit(C[t].hashes[j], getLeaf(seeds[t], j), NULL, sig->salt, t, j, params);
+        }
+        size_t last = params->numMPCParties - 1;
+        getAuxBits(auxBits, &tapes[t], params);
+        getAuxBits(auxBitsBlind, &tapes[t], params);
+        commit(C[t].hashes[last], getLeaf(seeds[t], last), auxBits, sig->salt, t, last, params); //TODO:NEED COmmit change
+    }
+
+    /* Simulate the online phase of the MPC */
+    msgs_t* msgs = allocateMsgs(params);
+    shares_t* tmp_shares = allocateShares(params->stateSizeBits); //TODO free
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        uint32_t* maskedKey = (uint32_t*)inputs[t];
+        uint32_t* blindMaskedKey = (uint32_t*)inputsBlind[t];
+        xor_array(maskedKey, maskedKey, privateKey, params->stateSizeWords);
+        xor_array(blindMaskedKey, blindMaskedKey, blindPrivateKey, params->stateSizeWords);
+        int rv = simulateBlindOnline(maskedKey, &tapes[t], tmp_shares, &msgs[t], plaintext, pubKey, params,blindPubKey,blindMaskedKey);
+        if (rv != 0) {
+            PRINT_DEBUG(("MPC simulation failed, aborting signature\n"));
+            freeShares(tmp_shares);
+            ret = -1;
+            goto Exit;
+        }
+    }
+    freeShares(tmp_shares);
+
+    /* Commit to the commitments and views */
+    allocateCommitments2(&Ch, params, params->numMPCRounds);
+    allocateCommitments2(&Cv, params, params->numMPCRounds);
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        commit_h(Ch.hashes[t], &C[t], params);
+        commit_v(Cv.hashes[t], inputs[t], &msgs[t], params);
+    }
+
+    /* Create a Merkle tree with Cv as the leaves */
+    treeCv = createTree(params->numMPCRounds, params->digestSizeBytes);
+    buildMerkleTree(treeCv, Cv.hashes, sig->salt, params);
+
+    /* Compute the challenge; two lists of integers */
+    uint16_t* challengeC = sig->challengeC;
+    uint16_t* challengeP = sig->challengeP;
+    HCP(sig->challengeHash, challengeC, challengeP, &Ch, treeCv->nodes[0], sig->salt, pubKey, plaintext, message, messageByteLength, params);
+
+    /* Send information required for checking commitments with Merkle tree.
+     * The commitments the verifier will be missing are those not in challengeC. */
+    size_t missingLeavesSize = params->numMPCRounds - params->numOpenedRounds;
+    uint16_t* missingLeaves = getMissingLeavesList(challengeC, params);
+    size_t cvInfoLen = 0;
+    uint8_t* cvInfo = openMerkleTree(treeCv, missingLeaves, missingLeavesSize, &cvInfoLen);
+    sig->cvInfo = cvInfo;
+    sig->cvInfoLen = cvInfoLen;
+    free(missingLeaves);
+
+    /* Reveal iSeeds for unopned rounds, those in {0..T-1} \ ChallengeC. */
+    sig->iSeedInfo = malloc(params->numMPCRounds * params->seedSizeBytes);
+    sig->iSeedInfoLen = revealSeeds(iSeedsTree, challengeC, params->numOpenedRounds,
+                                    sig->iSeedInfo, params->numMPCRounds * params->seedSizeBytes, params);
+    sig->iSeedInfo = realloc(sig->iSeedInfo, sig->iSeedInfoLen);
+
+    /* Assemble the proof */
+    proof2_t* proofs = sig->proofs;
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        if (contains(challengeC, params->numOpenedRounds, t)) {
+            allocateProof2(&proofs[t], params);
+            size_t P_index = indexOf(challengeC, params->numOpenedRounds, t);
+
+            uint16_t hideList[1];
+            hideList[0] = challengeP[P_index];
+            proofs[t].seedInfo = malloc(params->numMPCParties * params->seedSizeBytes);
+            proofs[t].seedInfoLen = revealSeeds(seeds[t], hideList, 1, proofs[t].seedInfo, params->numMPCParties * params->seedSizeBytes, params);
+            proofs[t].seedInfo = realloc(proofs[t].seedInfo, proofs[t].seedInfoLen);
+
+            size_t last = params->numMPCParties - 1;
+            if (challengeP[P_index] != last) {
+                getAuxBits(proofs[t].aux, &tapes[t], params);
+            }
+
+            memcpy(proofs[t].input, inputs[t], params->stateSizeBytes);
+            memcpy(proofs[t].msgs, msgs[t].msgs[challengeP[P_index]], params->andSizeBytes);
+            memcpy(proofs[t].C, C[t].hashes[challengeP[P_index]], params->digestSizeBytes);
+        }
+    }
+
+    sig->proofs = proofs;
+
+#if 0
+    printf("\n-----------------\nSelf-Test, trying to verify signature:\n");
+    int rv = verify_picnic3(sig, pubKey, plaintext, message, messageByteLength, params);
+    if (rv != 0) {
+        printf("Verification failed; signature invalid\n");
+        ret = -1;
+    }
+    else {
+        printf("Verification succeeded\n");
+    }
+    printf("--------Self-Test complete-----------------\n");
+#endif
+
+    Exit:
+
+    for (size_t t = 0; t < params->numMPCRounds; t++) {
+        freeRandomTape(&tapes[t]);
+        freeTree(seeds[t]);
+    }
+    free(tapes);
+    free(seeds);
+    freeTree(iSeedsTree);
+    freeTree(treeCv);
+
+    freeCommitments(C);
+    freeCommitments2(&Ch);
+    freeCommitments2(&Cv);
+    freeInputs(inputs);
+    freeInputs(inputsBlind);
+    freeMsgs(msgs);
+
+    return ret;
+
 }
 

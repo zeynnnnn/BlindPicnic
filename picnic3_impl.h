@@ -50,4 +50,6 @@ int serializeSignature2(const signature2_t* sig, uint8_t* sigBytes, size_t sigBy
 int deserializeSignature2(signature2_t* sig, const uint8_t* sigBytes, size_t sigBytesLen, paramset_t* params);
 
 
+int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, const uint8_t* message,
+                       size_t messageByteLength, signature2_t* sig, paramset_t* params,uint32_t* blindPrivateKey, uint32_t* blindPubKey);
 #endif /* PICNIC3_IMPL_H */

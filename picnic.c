@@ -323,15 +323,7 @@ int picnic_blind_pk(picnic_params_t parameters, picnic_privatekey_t* skBlinded, 
 
     memcpy(pkBlinded->plaintext , pk->plaintext,paramset.stateSizeBytes );
     memcpy(&(skBlinded->pk), pkBlinded, sizeof(picnic_publickey_t));
-    printf("\n ciphertext of pk:\n");
-    for(uint j = 0; j < sizeof(pk->ciphertext); j++) {
-        printf("%hhu ", pk->ciphertext[j]);
-    }
 
-    printf("\nBlind ciphertext of skBlinded->pk.ciphertext:\n");
-    for(uint j = 0; j < sizeof(skBlinded->pk.ciphertext); j++) {
-        printf("%hhu ", skBlinded->pk.ciphertext[j]);
-    }
     return 0;
 
 
@@ -376,7 +368,8 @@ int picnic_validate_blind_keypair( const picnic_publickey_t* publickey, const pi
         return -1;
     }
 
-
+    printHex("\n@Valid_Blind_Pair  pk->ciphertext:",publickey->ciphertext,paramset->stateSizeBytes);
+    printHex("@Valid_Blind_Pair  pkBlind->ciphertext:",pkBlind->ciphertext,paramset->stateSizeBytes);
     printf("Valid blind-key pair\n");
     return 0;
 }
@@ -464,12 +457,18 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
 {
     int ret;
     paramset_t paramset;
-    printf("Nonce:%s",nonce);
+    picnic_privatekey_t skBlind;
+    picnic_publickey_t pkBlind;
+    // changes skBlinded and pkBlinded to have skblind to sign?
+
+
     ret = get_param_set(sk->params, &paramset);
     if (ret != EXIT_SUCCESS) {
         PRINT_DEBUG(("Failed to initialize parameter set\n"));
         return -1;
     }
+    picnic_blind_pk(sk->params, &skBlind,  &(sk->pk),  &pkBlind, nonce);
+
 
     if (!is_picnic3(sk->params)) {
         signature_t* sig = (signature_t*)malloc(sizeof(signature_t));
@@ -499,13 +498,14 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
         free(sig);
     }
     else {
+        printf("Running picnic3\n");
         signature2_t* sig = (signature2_t*)malloc(sizeof(signature2_t));
         allocateSignature2(sig, &paramset);
         if (sig == NULL) {
             return -1;
         }
-        ret = sign_picnic3((uint32_t*)sk->data, (uint32_t*)sk->pk.ciphertext, (uint32_t*)sk->pk.plaintext, message,
-                           message_len, sig, &paramset);
+        ret = sign_blind_picnic3((uint32_t*)sk->data, (uint32_t*)sk->pk.ciphertext, (uint32_t*)sk->pk.plaintext, message,
+                           message_len, sig, &paramset,(uint32_t*)skBlind.data,(uint32_t*)pkBlind.ciphertext);
         if (ret != EXIT_SUCCESS) {
             PRINT_DEBUG(("Failed to create signature\n"));
             freeSignature2(sig, &paramset);

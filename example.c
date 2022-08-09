@@ -68,6 +68,9 @@ int picnicBlindExample(picnic_params_t parameters)
     fprintf(stdout, "Signing a %d byte message... ", MSG_LEN);
     fflush(stdout);
 
+
+
+
     ret = picnic_sign_blinded(&sk,nonce, message, sizeof(message), signature, &signature_len);
 
     if (ret != 0) {
@@ -87,7 +90,7 @@ int picnicBlindExample(picnic_params_t parameters)
             signature = newsig;
         }
     }
-
+/*
     fprintf(stdout, "Verifying signature... ");
     fflush(stdout);
 
@@ -143,7 +146,7 @@ int picnicBlindExample(picnic_params_t parameters)
         exit(-1);
     }
     printf(" success\n\n");
-
+*/
     free(signature);
 
     return 0;
