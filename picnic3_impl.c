@@ -209,6 +209,85 @@ static void computeAuxTape(randomTape_t* tapes, uint8_t* inputs, paramset_t* par
 }
 
 
+static void computeBlindAuxTape(randomTape_t* tapes, randomTape_t* secondTapes,uint8_t* inputs,uint8_t* secondinputs,  paramset_t* params)
+{
+    uint32_t roundKey[LOWMC_MAX_WORDS];
+    uint32_t x[LOWMC_MAX_WORDS] = {0};
+    uint32_t y[LOWMC_MAX_WORDS];
+    uint32_t key[LOWMC_MAX_WORDS];
+    uint32_t key0[LOWMC_MAX_WORDS];
+
+    key0[params->stateSizeWords - 1] = 0;
+    tapesToParityBits(key0, params->stateSizeBits, tapes);
+
+    // key = key0 x KMatrix[0]^(-1)
+    matrix_mul(key, key0, KMatrixInv(0, params), params);
+
+    if(inputs != NULL) {
+        memcpy(inputs, key, params->stateSizeBytes);
+    }
+
+
+    for (uint32_t r = params->numRounds; r > 0; r--) {
+        matrix_mul(roundKey, key, KMatrix(r, params), params);    // roundKey = key * KMatrix(r)
+        xor_array(x, x, roundKey, params->stateSizeWords);
+        matrix_mul(y, x, LMatrixInv(r-1, params), params);
+
+        if(r == 1) {
+            // Use key as input
+            memcpy(x, key0, params->stateSizeBytes);
+        }
+        else {
+            tapes->pos = params->stateSizeBits * 2 * (r - 1);
+            // Read input mask shares from tapes
+            tapesToParityBits(x, params->stateSizeBits, tapes);
+        }
+
+        tapes->pos = params->stateSizeBits * 2 * (r - 1) + params->stateSizeBits;
+        aux_mpc_sbox(x, y, tapes, params);
+    }
+
+    // Reset the random tape counter so that the online execution uses the
+    // same random bits as when computing the aux shares
+    tapes->pos = 0;
+
+    //Repeat
+
+    memset(x,0,sizeof(uint32_t) *LOWMC_MAX_WORDS);
+    key0[params->stateSizeWords - 1] = 0;
+    tapesToParityBits(key0, params->stateSizeBits, secondTapes);
+
+    // key = key0 x KMatrix[0]^(-1)
+    matrix_mul(key, key0, KMatrixInv(0, params), params);
+
+    if(secondinputs != NULL) {
+        memcpy(secondinputs, key, params->stateSizeBytes);
+    }
+
+
+    for (uint32_t r = params->numRounds; r > 0; r--) {
+        matrix_mul(roundKey, key, KMatrix(r, params), params);    // roundKey = key * KMatrix(r)
+        xor_array(x, x, roundKey, params->stateSizeWords);
+        matrix_mul(y, x, LMatrixInv(r-1, params), params);
+
+        if(r == 1) {
+            // Use key as input
+            memcpy(x, key0, params->stateSizeBytes);
+        }
+        else {
+            secondTapes->pos = params->stateSizeBits * 2 * (r - 1);
+            // Read input mask shares from tapes
+            tapesToParityBits(x, params->stateSizeBits, secondTapes);
+        }
+
+        secondTapes->pos = params->stateSizeBits * 2 * (r - 1) + params->stateSizeBits;
+        aux_mpc_sbox(x, y, secondTapes, params);
+    }
+
+    // Reset the random tape counter so that the online execution uses the
+    // same random bits as when computing the aux shares
+    secondTapes->pos = 0;
+}
 
 static void commit(uint8_t* digest, uint8_t* seed, uint8_t* aux, uint8_t* salt, size_t t, size_t j, paramset_t* params)
 {
@@ -380,7 +459,7 @@ static void setAuxBits(randomTape_t* tapes, uint8_t* input, paramset_t* params)
     }
 }
 
-static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, shares_t* tmp_shares,
+static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, randomTape_t* secondtapes, shares_t* tmp_shares,
                           msgs_t* msgs, const uint32_t* plaintext, const uint32_t* pubKey, paramset_t* params,uint32_t* blindPubKey,uint32_t* blindMaskedKey)
 {
     int ret = 0;
@@ -412,7 +491,8 @@ static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, shares_
         goto Exit;
     }
     //memset(roundKey,0,LOWMC_MAX_WORDS);
-    tapes->pos = 0;
+    //tapes->pos = 0;
+
     for (uint i = 0; i < LOWMC_MAX_WORDS; i++) {
         roundKey[i] =0;
     }
@@ -422,8 +502,8 @@ static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, shares_
     xor_array(state, roundKey, state, params->stateSizeWords);      // state = plaintext(state) + roundKey
 
     for (uint32_t r = 1; r <= params->numRounds; r++) {
-        tapesToWords(tmp_shares, tapes);
-        mpc_sbox(state, tmp_shares, tapes, msgs, params);
+        tapesToWords(tmp_shares, secondtapes);
+        mpc_sbox(state, tmp_shares, secondtapes, msgs, params);
         matrix_mul(state, state, LMatrix(r - 1, params), params);       // state = state * LMatrix (r-1)
         xor_array(state, state, RConstant(r - 1, params), params->stateSizeWords);  // state += RConstant
         matrix_mul(roundKey, blindMaskedKey, KMatrix(r, params), params);
@@ -722,7 +802,7 @@ int verify_picnic3(signature2_t* sig, const uint32_t* pubKey, const uint32_t* pl
     shares_t* tmp_shares = allocateShares(params->stateSizeBits);
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         if (contains(sig->challengeC, params->numOpenedRounds, t)) {
-            /* 2. When t is in C, we have everything we need to re-compute the view, as an honest signer would.
+            /* 2. When t is in C, we have everything we need to re-compute the view, as an honest er would.
              * We simulate the MPC with one fewer party; the unopned party's values are all set to zero. */
             size_t unopened = sig->challengeP[indexOf(sig->challengeC, params->numOpenedRounds, t)];
             size_t tapeLengthBytes = getTapeSizeBytes(params);
@@ -1135,38 +1215,39 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
 
     computeSaltAndRootSeed(saltAndRoot, params->saltSizeBytes + params->seedSizeBytes, privateKey, pubKey, plaintext, message, messageByteLength, params);
     memcpy(sig->salt, saltAndRoot, params->saltSizeBytes);
-    tree_t* iSeedsTree = generateSeeds(params->numMPCRounds, saltAndRoot + params->saltSizeBytes, sig->salt, 0, params);
+    tree_t* iSeedsTree = generateSeeds(params->numMPCRounds *2, saltAndRoot + params->saltSizeBytes, sig->salt, 0, params); //Double the size
     uint8_t** iSeeds = getLeaves(iSeedsTree);
     free(saltAndRoot);
 
-    randomTape_t* tapes = malloc(params->numMPCRounds * sizeof(randomTape_t));
-    tree_t** seeds = malloc(params->numMPCRounds * sizeof(tree_t*));
-    for (size_t t = 0; t < params->numMPCRounds; t++) {
+    randomTape_t* blindTapes = malloc(params->numMPCRounds * sizeof(randomTape_t)*2); //Double the size
+    tree_t** seeds = malloc(params->numMPCRounds * sizeof(tree_t*)*2); //Double the size
+    for (size_t t = 0; t < params->numMPCRounds *2; t++) { //double round number
         seeds[t] = generateSeeds(params->numMPCParties, iSeeds[t], sig->salt, t, params);
-        createRandomTapes(&tapes[t], getLeaves(seeds[t]), sig->salt, t, params);
+        createRandomTapes(&blindTapes[t], getLeaves(seeds[t]), sig->salt, t, params);
     }
 
     /* Preprocessing; compute aux tape for the N-th player, for each parallel rep */
-    inputs_t inputs = allocateInputs(params);
-    inputs_t inputsBlind = allocateInputs(params);
+    inputs_t inputs = allocateBlindInputs(params);
+
     uint8_t auxBits[MAX_AUX_BYTES] = {0,};
     uint8_t auxBitsBlind[MAX_AUX_BYTES] = {0,};
     for (size_t t = 0; t < params->numMPCRounds; t++) {
-        computeAuxTape(&tapes[t], inputs[t], params);
+        computeBlindAuxTape(&blindTapes[t],&blindTapes[t+params->numMPCRounds], inputs[t],inputs[t+params->numMPCRounds], params);
     }
-    for (size_t t = 0; t < params->numMPCRounds; t++) {
-        computeAuxTape(&tapes[t], inputsBlind[t], params);
-    }
+
     /* Commit to seeds and aux bits */
-    commitments_t* C = allocateCommitments(params, 0);
+    commitments_t* blindC = allocateBlindCommitments(params, 0);
     for (size_t t = 0; t < params->numMPCRounds; t++) {
+        printf("t:%zu\n",t);
         for (size_t j = 0; j < params->numMPCParties - 1; j++) {
-            commit(C[t].hashes[j], getLeaf(seeds[t], j), NULL, sig->salt, t, j, params);
+            commit(blindC[t].hashes[j], getLeaf(seeds[t], j), NULL, sig->salt, t, j, params);
         }
         size_t last = params->numMPCParties - 1;
-        getAuxBits(auxBits, &tapes[t], params);
-        getAuxBits(auxBitsBlind, &tapes[t], params);
-        commit(C[t].hashes[last], getLeaf(seeds[t], last), auxBits, sig->salt, t, last, params); //TODO:NEED COmmit change
+        getAuxBits(auxBits, &blindTapes[t],params);
+        getAuxBits(auxBitsBlind,  &blindTapes[t+params->numMPCRounds],params);
+        //printHex("AuxBit:",auxBits,LOWMC_MAX_WORDS);
+        //printHex("AuxBitBlind:",auxBitsBlind,LOWMC_MAX_WORDS);
+        commit(blindC[t].hashes[last], getLeaf(seeds[t], last), auxBits, sig->salt, t, last, params); //TODO:NEED COmmit change
     }
 
     /* Simulate the online phase of the MPC */
@@ -1174,10 +1255,10 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
     shares_t* tmp_shares = allocateShares(params->stateSizeBits); //TODO free
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         uint32_t* maskedKey = (uint32_t*)inputs[t];
-        uint32_t* blindMaskedKey = (uint32_t*)inputsBlind[t];
+        uint32_t* blindMaskedKey = (uint32_t*)inputs[t+params->numMPCRounds];
         xor_array(maskedKey, maskedKey, privateKey, params->stateSizeWords);
         xor_array(blindMaskedKey, blindMaskedKey, blindPrivateKey, params->stateSizeWords);
-        int rv = simulateBlindOnline(maskedKey, &tapes[t], tmp_shares, &msgs[t], plaintext, pubKey, params,blindPubKey,blindMaskedKey);
+        int rv = simulateBlindOnline(maskedKey, &blindTapes[t],&blindTapes[t +params->numMPCRounds], tmp_shares, &msgs[t], plaintext, pubKey, params,blindPubKey,blindMaskedKey);
         if (rv != 0) {
             PRINT_DEBUG(("MPC simulation failed, aborting signature\n"));
             freeShares(tmp_shares);
@@ -1191,7 +1272,7 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
     allocateCommitments2(&Ch, params, params->numMPCRounds);
     allocateCommitments2(&Cv, params, params->numMPCRounds);
     for (size_t t = 0; t < params->numMPCRounds; t++) {
-        commit_h(Ch.hashes[t], &C[t], params);
+        commit_h(Ch.hashes[t], &blindC[t], params);
         commit_v(Cv.hashes[t], inputs[t], &msgs[t], params);
     }
 
@@ -1235,12 +1316,12 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
 
             size_t last = params->numMPCParties - 1;
             if (challengeP[P_index] != last) {
-                getAuxBits(proofs[t].aux, &tapes[t], params);
+                getAuxBits(proofs[t].aux, &blindTapes[t], params);
             }
 
             memcpy(proofs[t].input, inputs[t], params->stateSizeBytes);
             memcpy(proofs[t].msgs, msgs[t].msgs[challengeP[P_index]], params->andSizeBytes);
-            memcpy(proofs[t].C, C[t].hashes[challengeP[P_index]], params->digestSizeBytes);
+            memcpy(proofs[t].C, blindC[t].hashes[challengeP[P_index]], params->digestSizeBytes);
         }
     }
 
@@ -1261,20 +1342,19 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
 
     Exit:
 
-    for (size_t t = 0; t < params->numMPCRounds; t++) {
-        freeRandomTape(&tapes[t]);
+    for (size_t t = 0; t < params->numMPCRounds*2; t++) { //double sioze
+        freeRandomTape(&blindTapes[t]);
         freeTree(seeds[t]);
     }
-    free(tapes);
+    free(blindTapes);
     free(seeds);
     freeTree(iSeedsTree);
     freeTree(treeCv);
 
-    freeCommitments(C);
+    freeBlindCommitments(blindC);
     freeCommitments2(&Ch);
     freeCommitments2(&Cv);
-    freeInputs(inputs);
-    freeInputs(inputsBlind);
+    freeBlindInputs(inputs);
     freeMsgs(msgs);
 
     return ret;

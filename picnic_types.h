@@ -66,6 +66,8 @@ void freeView(view_t* view);
 size_t getTapeSizeBytes(const paramset_t* params);
 void allocateRandomTape(randomTape_t* tape, paramset_t* params);
 void freeRandomTape(randomTape_t* tape);
+void allocateBlindRandomTape(randomTape_t* tape, paramset_t* params);
+void freeBlindRandomTape(randomTape_t* tape);
 
 void allocateProof(proof_t* proof, paramset_t* params);
 void freeProof(proof_t* proof);
@@ -81,12 +83,15 @@ void freeSeeds(seeds_t* seeds);
 
 commitments_t* allocateCommitments(paramset_t* params, size_t nCommitments);
 void freeCommitments(commitments_t* commitments);
-
+commitments_t* allocateBlindCommitments(paramset_t* params, size_t nCommitments);
+void freeBlindCommitments(commitments_t* commitments);
 void allocateCommitments2(commitments_t* commitments, paramset_t* params, size_t nCommitments);
 void freeCommitments2(commitments_t* commitments);
 
 inputs_t allocateInputs(paramset_t* params);
+inputs_t allocateBlindInputs(paramset_t* params);
 void freeInputs(inputs_t inputs);
+void freeBlindInputs(inputs_t inputs);
 
 msgs_t* allocateMsgs(paramset_t* params);
 void freeMsgs(msgs_t* msgs);

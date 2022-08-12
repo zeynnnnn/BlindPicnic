@@ -62,6 +62,19 @@ void allocateRandomTape(randomTape_t* tape, paramset_t* params)
     }
     tape->pos = 0;
 }
+void allocateBlindRandomTape(randomTape_t* tape, paramset_t* params)
+{
+    //Ntapes are doubled
+    tape->nTapes = params->numMPCParties ;
+    tape->tape = malloc(tape->nTapes * sizeof(uint8_t*) );
+    size_t tapeSizeBytes = getTapeSizeBytes(params);
+    uint8_t* slab = calloc(1, tape->nTapes * tapeSizeBytes);
+    for (uint8_t i = 0; i < tape->nTapes; i++) {
+        tape->tape[i] = slab;
+        slab += tapeSizeBytes;
+    }
+    tape->pos = 0;
+}
 
 void freeRandomTape(randomTape_t* tape)
 {
@@ -241,6 +254,35 @@ void freeCommitments(commitments_t* commitments)
 }
 
 
+commitments_t* allocateBlindCommitments(paramset_t* params, size_t numCommitments)
+{
+    commitments_t* commitments = malloc(params->numMPCRounds * sizeof(commitments_t)*2); //Double size
+
+    commitments->nCommitments = (numCommitments) ? numCommitments : params->numMPCParties;
+
+    uint8_t* slab = malloc(params->numMPCRounds *2* (commitments->nCommitments * params->digestSizeBytes +
+                                                   commitments->nCommitments * sizeof(uint8_t*)) ); //Double size
+
+    for (uint32_t i = 0; i < params->numMPCRounds*2; i++) {
+        commitments[i].hashes = (uint8_t**)slab;
+        slab += commitments->nCommitments * sizeof(uint8_t*);
+
+        for (uint32_t j = 0; j < commitments->nCommitments; j++) {
+            commitments[i].hashes[j] = slab;
+            slab += params->digestSizeBytes;
+        }
+    }
+
+    return commitments;
+}
+
+void freeBlindCommitments(commitments_t* commitments)
+{
+    free(commitments[0].hashes);
+    free(commitments);
+}
+
+
 /* Allocate one commitments_t object with capacity for numCommitments values */
 void allocateCommitments2(commitments_t* commitments, paramset_t* params, size_t numCommitments)
 {
@@ -281,8 +323,28 @@ inputs_t allocateInputs(paramset_t* params)
 
     return inputs;
 }
+inputs_t allocateBlindInputs(paramset_t* params)
+{
+    uint8_t* slab = calloc(1, params->numMPCRounds *2 * (params->stateSizeWords*sizeof(uint32_t) + sizeof(uint8_t*)));//double size
+
+    inputs_t inputs = (uint8_t**)slab;
+
+    slab += params->numMPCRounds * sizeof(uint8_t*)*2;
+
+    for (uint32_t i = 0; i < params->numMPCRounds *2; i++) { //double rounds
+        inputs[i] = (uint8_t*)slab;
+        slab += params->stateSizeWords * sizeof(uint32_t);
+    }
+
+    return inputs;
+}
 
 void freeInputs(inputs_t inputs)
+{
+    free(inputs);
+}
+
+void freeBlindInputs(inputs_t inputs)
 {
     free(inputs);
 }
