@@ -212,9 +212,9 @@ void allocateSignature2Blind(signature2_t_blind* sig, paramset_t* params)
     sig->challengeC = (uint16_t*)malloc(params->numOpenedRounds * sizeof(uint16_t));
     sig->challengeP = (uint16_t*)malloc(params->numOpenedRounds * sizeof(uint16_t));
     sig->challengeHash = (uint8_t*)malloc(params->digestSizeBytes);
-    sig->proofs = calloc(params->numMPCRounds, sizeof(proof2_t));
-    // Individual proofs are allocated during signature generation, only for rounds when neeeded
 
+    // Individual proofs are allocated during signature generation, only for rounds when neeeded
+    sig->proofs = calloc(params->numMPCRounds, sizeof(proof2_t_blind));
     sig->iSeedInfoSecond = NULL;
 }
 

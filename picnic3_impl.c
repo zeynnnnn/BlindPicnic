@@ -1478,13 +1478,12 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
 
     /* Preprocessing; compute aux tape for the N-th player, for each parallel rep */
     inputs_t inputs = allocateBlindInputs(params);
-    printf("inputs[t+params->numMPCRounds]:%s\n",inputs[params->numMPCRounds]);
     uint8_t auxBits[MAX_AUX_BYTES] = {0,};
     uint8_t auxBitsBlind[MAX_AUX_BYTES] = {0,};
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         computeBlindAuxTape(&blindTapes[t],&blindTapes[t+params->numMPCRounds], inputs[t],inputs[t+params->numMPCRounds], params);
     }
-    printf("inputs[t+params->numMPCRounds]:%s\n",inputs[params->numMPCRounds]);
+    //printf("inputs[t+params->numMPCRounds]:%s\n",inputs[params->numMPCRounds]);
     /* Commit to seeds and aux bits */
     commitments_t* blindC = allocateBlindCommitments(params, 0);
     for (size_t t = 0; t < params->numMPCRounds; t++) {
@@ -1517,6 +1516,7 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
             goto Exit;
         }
     }
+
     freeShares(tmp_shares);
 
     /* Commit to the commitments and views */
@@ -1562,15 +1562,15 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
             size_t P_index = indexOf(challengeC, params->numOpenedRounds, t);
             uint16_t hideList[1];
             hideList[0] = challengeP[P_index];
-            printf("\nseeds[t].numnodes: %zu\n",seeds[t]->numNodes);
-            printf("seeds[t].numLeaves: %zu\n",seeds[t]->numLeaves);
+            //printf("\nseeds[t].numnodes: %zu\n",seeds[t]->numNodes);
+            //printf("seeds[t].numLeaves: %zu\n",seeds[t]->numLeaves);
             proofs[t].seedInfo = malloc(params->numMPCParties * params->seedSizeBytes);
             proofs[t].seedInfoSecond = malloc(params->numMPCParties * params->seedSizeBytes);
             proofs[t].seedInfoLen = revealSeeds(seeds[t], hideList, 1, proofs[t].seedInfo, params->numMPCParties * params->seedSizeBytes, params);
-            printf("First seedInfoLen :%zu", proofs[t].seedInfoLen);
+            //printf("First seedInfoLen :%zu", proofs[t].seedInfoLen);
             proofs[t].seedInfo = realloc(proofs[t].seedInfo, proofs[t].seedInfoLen);
             proofs[t].seedInfoLen = revealSeeds(seeds[t+ params->numMPCRounds], hideList, 1, proofs[t].seedInfoSecond, params->numMPCParties * params->seedSizeBytes, params);
-            printf("Second seedInfoLen :%zu", proofs[t].seedInfoLen);
+            //printf("Second seedInfoLen :%zu", proofs[t].seedInfoLen);
             proofs[t].seedInfoSecond = realloc(proofs[t].seedInfoSecond, proofs[t].seedInfoLen);     //TODO:Could go so rwrong
 
             size_t last = params->numMPCParties - 1;
@@ -1604,26 +1604,23 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
 
     Exit:
 
-    for (size_t t = 0; t < params->numMPCRounds*2; t++) { //double sioze
-        printf("\nFree t: %zu\n",t);
-        //freeRandomTape(&blindTapes[t]);
-        freeTree(seeds[t]);
-        printf("blindTapes[t].pos %d\n",blindTapes[t].pos);
-        printf("seeds[t]->numLeaves %zu\n",seeds[t]->numLeaves);
+     for (size_t t = 0; t < params->numMPCRounds*2; t++) { //double sioze
+          freeRandomTape(&blindTapes[t]);
+          freeTree(seeds[t]);
     }
-    /*
-    free(blindTapes);
-    free(seeds);
 
-    freeTree(iSeedsTree);
-    freeTree(treeCv);
-    freeBlindCommitments(blindC);
-    freeCommitments2(&Ch);
-    freeCommitments2(&Cv);
-    freeBlindInputs(inputs);
-    freeMsgs(msgs);
-         freeMsgs(msgsSecond);
-*/
+      free(blindTapes);
+      free(seeds);
+
+      freeTree(iSeedsTree);
+      freeTree(treeCv);
+      freeBlindCommitments(blindC);
+      freeCommitments2(&Ch);
+      freeCommitments2(&Cv);
+      freeBlindInputs(inputs);
+      freeMsgs(msgs);
+      freeMsgs(msgsSecond);
+
     return ret;
 
 }
