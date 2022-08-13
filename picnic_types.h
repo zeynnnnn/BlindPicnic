@@ -74,6 +74,9 @@ void freeProof(proof_t* proof);
 
 void allocateProof2(proof2_t* proof, paramset_t* params);
 void freeProof2(proof2_t* proof);
+void allocateProof2Blind(proof2_t_blind* proof, paramset_t* params);
+void freeProof2Blind(proof2_t_blind* proof);
+
 
 void allocateSignature(signature_t* sig, paramset_t* params);
 void freeSignature(signature_t* sig, paramset_t* params);
@@ -95,7 +98,7 @@ void freeBlindInputs(inputs_t inputs);
 
 msgs_t* allocateMsgs(paramset_t* params);
 void freeMsgs(msgs_t* msgs);
-
+msgs_t* allocateBlindMsgs(paramset_t* params);
 shares_t* allocateShares(size_t count);
 void freeShares(shares_t* shares);
 

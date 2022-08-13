@@ -329,6 +329,43 @@ size_t revealSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize, uint8_
     return output - outputBase;
 }
 
+size_t revealBlindSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize, uint8_t* output,uint8_t* outputSecond,  size_t outputSize, paramset_t* params)
+{
+    uint8_t* outputBase = output;
+    uint8_t outputBaseS = *outputSecond*params->numMPCRounds;
+    printf("%hhu",outputBaseS);
+    size_t revealedSize = 0;
+
+    if (outputSize > INT_MAX) {
+        return -1;
+    }
+    int outLen = (int)outputSize;
+printf("Tree.numnodes: %zu\n",tree->numNodes);
+    printf("Tree.numLeaves: %zu\n",tree->numLeaves);
+
+    size_t* revealed = getRevealedNodes(tree, hideList, hideListSize, &revealedSize);
+    for (size_t i = 0; i < revealedSize; i++) {
+        printf("%zu ",revealed[i]);
+    }
+    for (size_t i = 0; i < revealedSize; i++) {
+        outLen -= params->seedSizeBytes ;
+        if (outLen < 0) {
+            assert(!"Insufficient sized buffer provided to revealSeeds");
+            free(revealed);
+            return 0;
+        }
+        memcpy(output, tree->nodes[revealed[i]], params->seedSizeBytes);
+        memcpy(outputSecond, tree->nodes[revealed[i]+params->numMPCRounds], params->seedSizeBytes);
+        output += params->seedSizeBytes;
+        outputSecond += params->seedSizeBytes;
+    }
+
+
+    free(revealed);
+    return (output - outputBase); //Double size
+}
+
+
 int reconstructSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize,
                      uint8_t* input, size_t inputLen, uint8_t* salt, size_t repIndex, paramset_t* params)
 {

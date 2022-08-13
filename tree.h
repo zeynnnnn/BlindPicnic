@@ -66,3 +66,4 @@ size_t openMerkleTreeSize(size_t numNodes, uint16_t* notMissingLeaves, size_t no
 int addMerkleNodes(tree_t* tree, uint16_t* missingLeaves, size_t missingLeavesSize, uint8_t* input, size_t inputSize);
 int verifyMerkleTree(tree_t* tree, uint8_t** leafData, uint8_t* salt, paramset_t* params);
 
+size_t revealBlindSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize, uint8_t* output,uint8_t* outputSecond,  size_t outputSize, paramset_t* params);

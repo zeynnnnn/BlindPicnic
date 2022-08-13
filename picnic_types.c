@@ -62,19 +62,7 @@ void allocateRandomTape(randomTape_t* tape, paramset_t* params)
     }
     tape->pos = 0;
 }
-void allocateBlindRandomTape(randomTape_t* tape, paramset_t* params)
-{
-    //Ntapes are doubled
-    tape->nTapes = params->numMPCParties ;
-    tape->tape = malloc(tape->nTapes * sizeof(uint8_t*) );
-    size_t tapeSizeBytes = getTapeSizeBytes(params);
-    uint8_t* slab = calloc(1, tape->nTapes * tapeSizeBytes);
-    for (uint8_t i = 0; i < tape->nTapes; i++) {
-        tape->tape[i] = slab;
-        slab += tapeSizeBytes;
-    }
-    tape->pos = 0;
-}
+
 
 void freeRandomTape(randomTape_t* tape)
 {
@@ -96,6 +84,25 @@ void allocateProof2(proof2_t* proof, paramset_t* params)
     proof->msgs = calloc(1, params->andSizeBytes);
 
 }
+
+void allocateProof2Blind(proof2_t_blind * proof, paramset_t* params)
+{
+    memset(proof, 0, sizeof(proof2_t_blind));
+
+    proof->seedInfo = NULL;     // Sign/verify code sets it
+    proof->seedInfoSecond = NULL;
+    proof->seedInfoLen = 0;
+    proof->C = malloc(params->digestSizeBytes);
+
+    proof->input = calloc(1, params->stateSizeBytes);
+    proof->aux = calloc(1, params->andSizeBytes);
+    proof->msgs = calloc(1, params->andSizeBytes);
+
+    proof->inputSecond = calloc(1, params->stateSizeBytes);
+    proof->auxSecond = calloc(1, params->andSizeBytes);
+    proof->msgsSecond = calloc(1, params->andSizeBytes);
+
+}
 void freeProof2(proof2_t* proof)
 {
     free(proof->seedInfo);
@@ -103,6 +110,20 @@ void freeProof2(proof2_t* proof)
     free(proof->input);
     free(proof->aux);
     free(proof->msgs);
+}
+void freeProof2Blind(proof2_t_blind * proof)
+{
+    free(proof->seedInfo);
+    free(proof->C);
+    free(proof->input);
+    free(proof->aux);
+    free(proof->msgs);
+
+
+    free(proof->seedInfoSecond);
+    free(proof->inputSecond);
+    free(proof->auxSecond);
+    free(proof->msgsSecond);
 }
 
 void allocateProof(proof_t* proof, paramset_t* params)
@@ -179,6 +200,38 @@ void freeSignature2(signature2_t* sig, paramset_t* params)
         freeProof2(&sig->proofs[i]);
     }
     free(sig->proofs);
+}
+
+void allocateSignature2Blind(signature2_t_blind* sig, paramset_t* params)
+{
+    sig->salt = (uint8_t*)malloc(params->saltSizeBytes);
+    sig->iSeedInfo = NULL;
+    sig->iSeedInfoLen = 0;
+    sig->cvInfo = NULL;       // Sign/verify code sets it
+    sig->cvInfoLen = 0;
+    sig->challengeC = (uint16_t*)malloc(params->numOpenedRounds * sizeof(uint16_t));
+    sig->challengeP = (uint16_t*)malloc(params->numOpenedRounds * sizeof(uint16_t));
+    sig->challengeHash = (uint8_t*)malloc(params->digestSizeBytes);
+    sig->proofs = calloc(params->numMPCRounds, sizeof(proof2_t));
+    // Individual proofs are allocated during signature generation, only for rounds when neeeded
+
+    sig->iSeedInfoSecond = NULL;
+}
+
+void freeSignature2Blind(signature2_t_blind * sig, paramset_t* params)
+{
+    free(sig->salt);
+    free(sig->iSeedInfo);
+    free(sig->cvInfo);
+    free(sig->challengeC);
+    free(sig->challengeP);
+    free(sig->challengeHash);
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        freeProof2Blind(&sig->proofs[i]);
+    }
+    free(sig->proofs);
+
+    free(sig->iSeedInfoSecond);
 }
 
 seeds_t* allocateSeeds(paramset_t* params)
@@ -329,12 +382,13 @@ inputs_t allocateBlindInputs(paramset_t* params)
 
     inputs_t inputs = (uint8_t**)slab;
 
-    slab += params->numMPCRounds * sizeof(uint8_t*)*2;
+    slab += params->numMPCRounds * sizeof(uint8_t*)*2; //double rounds
 
-    for (uint32_t i = 0; i < params->numMPCRounds *2; i++) { //double rounds
+    for (uint32_t i = 0; i < params->numMPCRounds*2; i++) { //double rounds
         inputs[i] = (uint8_t*)slab;
         slab += params->stateSizeWords * sizeof(uint32_t);
     }
+
 
     return inputs;
 }
@@ -370,7 +424,27 @@ msgs_t* allocateMsgs(paramset_t* params)
 
     return msgs;
 }
+msgs_t* allocateBlindMsgs(paramset_t* params)
+{
+    msgs_t* msgs = malloc(params->numMPCRounds * sizeof(msgs_t)*2); //Double size
+    size_t msgsSize = params->andSizeBytes;
+    uint8_t* slab = calloc(1, params->numMPCRounds *2* (params->numMPCParties * msgsSize + //Double size
+                                                      params->numMPCParties * sizeof(uint8_t*)));
 
+    for (uint32_t i = 0; i < params->numMPCRounds*2; i++) {//Double size
+        msgs[i].pos = 0;
+        msgs[i].unopened = -1;
+        msgs[i].msgs = (uint8_t**)slab;
+        slab += params->numMPCParties * sizeof(uint8_t*);
+
+        for (uint32_t j = 0; j < params->numMPCParties; j++) {
+            msgs[i].msgs[j] = slab;
+            slab += msgsSize;
+        }
+    }
+
+    return msgs;
+}
 void freeMsgs(msgs_t* msgs)
 {
     free(msgs[0].msgs);

@@ -499,8 +499,8 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
     }
     else {
         printf("Running picnic3\n");
-        signature2_t* sig = (signature2_t*)malloc(sizeof(signature2_t));
-        allocateSignature2(sig, &paramset);
+        signature2_t_blind * sig = (signature2_t_blind *)malloc(sizeof(signature2_t_blind));
+        allocateSignature2Blind(sig, &paramset);
         if (sig == NULL) {
             return -1;
         }
@@ -508,21 +508,21 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
                            message_len, sig, &paramset,(uint32_t*)skBlind.data,(uint32_t*)pkBlind.ciphertext);
         if (ret != EXIT_SUCCESS) {
             PRINT_DEBUG(("Failed to create signature\n"));
-            freeSignature2(sig, &paramset);
+            freeSignature2Blind(sig, &paramset);
             free(sig);
             return -1;
         }
-        ret = serializeSignature2(sig, signature, *signature_len, &paramset);
+        ret = serializeSignature2Blind(sig, signature, *signature_len, &paramset);
         if (ret == -1) {
             PRINT_DEBUG(("Failed to serialize signature\n"));
             fflush(stderr);
-            freeSignature2(sig, &paramset);
+            freeSignature2Blind(sig, &paramset);
             free(sig);
             return -1;
         }
         *signature_len = ret;
 
-        freeSignature2(sig, &paramset);
+        freeSignature2Blind(sig, &paramset);
         free(sig);
     }
 
@@ -735,30 +735,30 @@ int picnic_verify_blinded(picnic_publickey_t* pk, const uint8_t* message, size_t
         free(sig);
     }
     else {
-        signature2_t* sig = (signature2_t*)malloc(sizeof(signature2_t));
-        allocateSignature2(sig, &paramset);
+        signature2_t_blind * sig = (signature2_t_blind *)malloc(sizeof(signature2_t_blind));
+        allocateSignature2Blind(sig, &paramset);
         if (sig == NULL) {
             return -1;
         }
 
-        ret = deserializeSignature2(sig, signature, signature_len, &paramset);
+        ret = deserializeSignature2Blind(sig, signature, signature_len, &paramset);
         if (ret != EXIT_SUCCESS) {
             PRINT_DEBUG(("Failed to deserialize signature\n"));
-            freeSignature2(sig, &paramset);
+            freeSignature2Blind(sig, &paramset);
             free(sig);
             return -1;
         }
 
-        ret = verify_picnic3(sig, (uint32_t*)pk->ciphertext,
+        ret = verify_blind_picnic3(sig, (uint32_t*)pk->ciphertext,
                              (uint32_t*)pk->plaintext, message, message_len, &paramset);
         if (ret != EXIT_SUCCESS) {
             /* Signature is invalid, or verify function failed */
-            freeSignature2(sig, &paramset);
+            freeSignature2Blind(sig, &paramset);
             free(sig);
             return -1;
         }
 
-        freeSignature2(sig, &paramset);
+        freeSignature2Blind(sig, &paramset);
         free(sig);
     }
 
