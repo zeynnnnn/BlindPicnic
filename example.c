@@ -69,8 +69,6 @@ int picnicBlindExample(picnic_params_t parameters)
     fflush(stdout);
 
 
-
-
     ret = picnic_sign_blinded(&sk,nonce, message, sizeof(message), signature, &signature_len);
 
     if (ret != 0) {
@@ -90,7 +88,7 @@ int picnicBlindExample(picnic_params_t parameters)
             signature = newsig;
         }
     }
-/*
+
     fprintf(stdout, "Verifying signature... ");
     fflush(stdout);
 
@@ -98,7 +96,7 @@ int picnicBlindExample(picnic_params_t parameters)
 
     if (ret != 0) {
         printf("picnic_blind_verify failed\n");
-        exit(-1);
+        //exit(-1);
     }
     printf(" success\n");
 
@@ -118,10 +116,10 @@ int picnicBlindExample(picnic_params_t parameters)
         exit(-1);
     }
 
-    ret = picnic_verify(&pk, message, sizeof(message), signature, signature_len);
+    ret = picnic_verify_blinded(&pkBlind, message, sizeof(message), signature, signature_len);
     if (ret != 0) {
         printf("picnic_verify failed after de-serializing public key\n");
-        exit(-1);
+        //exit(-1);
     }
     printf(" success\n");
 
@@ -140,13 +138,13 @@ int picnicBlindExample(picnic_params_t parameters)
         exit(-1);
     }
 
-    ret = picnic_validate_keypair(&sk, &pk);
+    ret = picnic_validate_blind_keypair( &pk,&skBlind,&pkBlind);
     if (ret != 0) {
         printf("Keypair invalid after deserializing private key\n");
         exit(-1);
     }
     printf(" success\n\n");
-*/
+
     free(signature);
 
     return 0;

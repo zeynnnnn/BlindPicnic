@@ -497,7 +497,7 @@ static void setAuxBits(randomTape_t* tapes, uint8_t* input, paramset_t* params)
 }
 
 static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, randomTape_t* secondtapes, shares_t* tmp_shares,
-                          msgs_t* msgs,    msgs_t* msgsSecond,  const uint32_t* plaintext, const uint32_t* pubKey, paramset_t* params,uint32_t* blindPubKey,uint32_t* blindMaskedKey)
+                          msgs_t* msgs,    msgs_t* msgsSecond,  const uint32_t* plaintext, const uint32_t* pubKey, paramset_t* params,const uint32_t* blindPubKey,uint32_t* blindMaskedKey)
 {
     int ret = 0;
     uint32_t roundKey[LOWMC_MAX_WORDS] = {0};
@@ -516,7 +516,7 @@ static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, randomT
     }
 
     //printHex("@Simulate_Online ciphertext (y) from pk:", (uint8_t*)state, params->stateSizeBytes);
-
+if (pubKey!=NULL){
     if(memcmp(state, pubKey, params->stateSizeBytes) != 0) {
 #ifdef DEBUG
         printf("%s: output does not match pubKey\n", __func__);
@@ -527,6 +527,7 @@ static int simulateBlindOnline(uint32_t* maskedKey, randomTape_t* tapes, randomT
         printf("Failed in first comparison for state pubkey!");
         goto Exit;
     }
+}
     //memset(roundKey,0,LOWMC_MAX_WORDS);
     //tapes->pos = 0;
 
@@ -1287,12 +1288,12 @@ int serializeSignature2(const signature2_t* sig, uint8_t* sigBytes, size_t sigBy
 
 
 int deserializeSignature2Blind(signature2_t_blind * sig, const uint8_t* sigBytes, size_t sigBytesLen, paramset_t* params)
-{//TODO
+{
     /* Read the challenge and salt */
     size_t bytesRequired = params->digestSizeBytes + params->saltSizeBytes;
 
     if (sigBytesLen < bytesRequired) {
-        return EXIT_FAILURE;
+       return EXIT_FAILURE;
     }
 
 #if 0
@@ -1306,9 +1307,12 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
     sigBytes += params->saltSizeBytes;
 
     expandChallengeHash(sig->challengeHash, sig->challengeC, sig->challengeP, params);
-
+    printHex("deserialize challengeC", (const uint8_t *) sig->challengeC, params->digestSizeBytes);
     /* Add size of iSeeds tree data */
-    sig->iSeedInfoLen = revealSeedsSize(params->numMPCRounds, sig->challengeC, params->numOpenedRounds, params);
+    sig->iSeedInfoLen = revealBlindSeedsSize(params->numMPCRounds, sig->challengeC, params->numOpenedRounds, params);
+    bytesRequired += sig->iSeedInfoLen;
+
+// //for     uint8_t* iSeedInfoSecond;
     bytesRequired += sig->iSeedInfoLen;
 
     /* Add the size of the Cv Merkle tree data */
@@ -1317,32 +1321,47 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
     sig->cvInfoLen = openMerkleTreeSize(params->numMPCRounds, missingLeaves, missingLeavesSize, params);
     bytesRequired += sig->cvInfoLen;
     free(missingLeaves);
-
+    printf("Before deserialize:  sigBytes:%zu  and sig->iSeedInfoLen:%zu\\n",bytesRequired,sig->iSeedInfoLen);
     /* Compute the number of bytes required for the proofs */
     uint16_t hideList[1] = { 0 };
     size_t seedInfoLen = revealSeedsSize(params->numMPCParties, hideList, 1, params);
+    size_t counter=0;
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         if (contains(sig->challengeC, params->numOpenedRounds, t)) {
+
             size_t P_t = sig->challengeP[indexOf(sig->challengeC, params->numOpenedRounds, t)];
             if (P_t != (params->numMPCParties - 1)) {
                 bytesRequired += params->andSizeBytes;
+                bytesRequired += params->andSizeBytes; //for     uint8_t* auxSecond;
             }
             bytesRequired += seedInfoLen;
             bytesRequired += params->stateSizeBytes;
             bytesRequired += params->andSizeBytes;
             bytesRequired += params->digestSizeBytes;
+
+            bytesRequired += seedInfoLen;
+            bytesRequired += params->stateSizeBytes;
+            bytesRequired += params->andSizeBytes;
+           // printf("t at deserialize: %zu bytesRequired:%zu \n",t,bytesRequired);
+            counter++;
+            printf("counter at deserialize: %zu \n",counter);
         }
     }
 
     /* Fail if the signature does not have the exact number of bytes we expect */
     if (sigBytesLen != bytesRequired) {
-        PRINT_DEBUG(("sigBytesLen = %lu, expected bytesRequired = %lu\n", sigBytesLen, bytesRequired));
+        printf("@deserializeSignature2Blind: sigBytesLen != bytesRequired where sigBytesLen:%zu , bytesRequired:%zu\n",sigBytesLen,bytesRequired);
         return EXIT_FAILURE;
     }
 
     sig->iSeedInfo = malloc(sig->iSeedInfoLen);
     memcpy(sig->iSeedInfo, sigBytes, sig->iSeedInfoLen);
     sigBytes += sig->iSeedInfoLen;
+
+    sig->iSeedInfoSecond = malloc(sig->iSeedInfoLen);
+    memcpy(sig->iSeedInfoSecond, sigBytes, sig->iSeedInfoLen);
+    sigBytes += sig->iSeedInfoLen;
+
 
     sig->cvInfo = malloc(sig->cvInfoLen);
     memcpy(sig->cvInfo, sigBytes, sig->cvInfoLen);
@@ -1357,11 +1376,24 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
             memcpy(sig->proofs[t].seedInfo, sigBytes, sig->proofs[t].seedInfoLen);
             sigBytes += sig->proofs[t].seedInfoLen;
 
+            sig->proofs[t].seedInfoSecond = malloc(sig->proofs[t].seedInfoLen);
+            memcpy(sig->proofs[t].seedInfoSecond, sigBytes, sig->proofs[t].seedInfoLen);
+            sigBytes += sig->proofs[t].seedInfoLen;
+
+
             size_t P_t = sig->challengeP[indexOf(sig->challengeC, params->numOpenedRounds, t)];
             if (P_t != (params->numMPCParties - 1) ) {
                 memcpy(sig->proofs[t].aux, sigBytes, params->andSizeBytes);
                 sigBytes += params->andSizeBytes;
+
+                memcpy(sig->proofs[t].auxSecond, sigBytes, params->andSizeBytes);
+                sigBytes += params->andSizeBytes;
+
                 if (!arePaddingBitsZero(sig->proofs[t].aux, 3 * params->numRounds * params->numSboxes)) {
+                    PRINT_DEBUG(("failed while deserializing aux bits\n"));
+                    return -1;
+                }
+                if (!arePaddingBitsZero(sig->proofs[t].auxSecond, 3 * params->numRounds * params->numSboxes)) {
                     PRINT_DEBUG(("failed while deserializing aux bits\n"));
                     return -1;
                 }
@@ -1369,12 +1401,24 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
 
             memcpy(sig->proofs[t].input, sigBytes, params->stateSizeBytes);
             sigBytes += params->stateSizeBytes;
+            memcpy(sig->proofs[t].inputSecond, sigBytes, params->stateSizeBytes);
+            sigBytes += params->stateSizeBytes;
+
 
             size_t msgsByteLength = params->andSizeBytes;
             memcpy(sig->proofs[t].msgs, sigBytes, msgsByteLength);
             sigBytes += msgsByteLength;
+            memcpy(sig->proofs[t].msgsSecond, sigBytes, msgsByteLength);
+            sigBytes += msgsByteLength;
+
             size_t msgsBitLength =  3 * params->numRounds * params->numSboxes;
+
+
             if (!arePaddingBitsZero(sig->proofs[t].msgs, msgsBitLength)) {
+                PRINT_DEBUG(("failed while deserializing msgs bits\n"));
+                return -1;
+            }
+            if (!arePaddingBitsZero(sig->proofs[t].msgsSecond, msgsBitLength)) {
                 PRINT_DEBUG(("failed while deserializing msgs bits\n"));
                 return -1;
             }
@@ -1388,47 +1432,66 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
 }
 
 int serializeSignature2Blind(const signature2_t_blind * sig, uint8_t* sigBytes, size_t sigBytesLen, paramset_t* params)
-{ //TODO
+{
     uint8_t* sigBytesBase = sigBytes;
 
     /* Compute the number of bytes required for the signature */
     size_t bytesRequired = params->digestSizeBytes + params->saltSizeBytes;     /* challenge and salt */
 
     bytesRequired += sig->iSeedInfoLen;     /* Encode only iSeedInfo, the length will be recomputed by deserialize */
+    bytesRequired += sig->iSeedInfoLen; //for     uint8_t* iSeedInfoSecond;
     bytesRequired += sig->cvInfoLen;
 
     for (size_t t = 0; t < params->numMPCRounds; t++) {   /* proofs */
         if (contains(sig->challengeC, params->numOpenedRounds, t)) {
+
             size_t P_t = sig->challengeP[indexOf(sig->challengeC, params->numOpenedRounds, t)];
             bytesRequired += sig->proofs[t].seedInfoLen;
+            bytesRequired += sig->proofs[t].seedInfoLen; //for seedInfoSecond
             if (P_t != (params->numMPCParties - 1)) {
                 bytesRequired += params->andSizeBytes;
+                bytesRequired += params->andSizeBytes;  //for     uint8_t* auxSecond;
             }
             bytesRequired += params->stateSizeBytes;
             bytesRequired += params->andSizeBytes;
             bytesRequired += params->digestSizeBytes;
+
+            //for    uint8_t* msgsSecond;     uint8_t* inputSecond;
+            bytesRequired += params->stateSizeBytes;
+            bytesRequired += params->andSizeBytes;
+
         }
     }
 
     if (sigBytesLen < bytesRequired) {
+        printf("@serializeSignature2Blind: sigBytesLen < bytesRequired where sigBytesLen:%zu , bytesRequired:%zu\n",sigBytesLen,bytesRequired);
         return -1;
     }
 
     memcpy(sigBytes, sig->challengeHash, params->digestSizeBytes);
     sigBytes += params->digestSizeBytes;
-
+    printHex("Serialize challengeC", (const uint8_t *) sig->challengeC, params->digestSizeBytes);
     memcpy(sigBytes, sig->salt, params->saltSizeBytes);
     sigBytes += params->saltSizeBytes;
 
     memcpy(sigBytes, sig->iSeedInfo, sig->iSeedInfoLen);
     sigBytes += sig->iSeedInfoLen;
+
+
+    memcpy(sigBytes, sig->iSeedInfoSecond, sig->iSeedInfoLen);
+    sigBytes += sig->iSeedInfoLen;
+
     memcpy(sigBytes, sig->cvInfo, sig->cvInfoLen);
     sigBytes += sig->cvInfoLen;
-
+    printf("Before serialize:  sigBytes:%zu and sig->iSeedInfoLen:%zu\n",sigBytes - sigBytesBase,sig->iSeedInfoLen);
     /* Write the proofs */
+    size_t counter=0;
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         if (contains(sig->challengeC, params->numOpenedRounds, t)) {
             memcpy(sigBytes, sig->proofs[t].seedInfo,  sig->proofs[t].seedInfoLen);
+            sigBytes += sig->proofs[t].seedInfoLen;
+
+            memcpy(sigBytes, sig->proofs[t].seedInfoSecond,  sig->proofs[t].seedInfoLen);
             sigBytes += sig->proofs[t].seedInfoLen;
 
             size_t P_t = sig->challengeP[indexOf(sig->challengeC, params->numOpenedRounds, t)];
@@ -1436,16 +1499,27 @@ int serializeSignature2Blind(const signature2_t_blind * sig, uint8_t* sigBytes, 
             if (P_t != (params->numMPCParties - 1) ) {
                 memcpy(sigBytes, sig->proofs[t].aux, params->andSizeBytes);
                 sigBytes += params->andSizeBytes;
+
+                memcpy(sigBytes, sig->proofs[t].auxSecond, params->andSizeBytes);
+                sigBytes += params->andSizeBytes;
             }
 
             memcpy(sigBytes, sig->proofs[t].input, params->stateSizeBytes);
             sigBytes += params->stateSizeBytes;
 
+            memcpy(sigBytes, sig->proofs[t].inputSecond, params->stateSizeBytes);
+            sigBytes += params->stateSizeBytes;
+
             memcpy(sigBytes, sig->proofs[t].msgs, params->andSizeBytes);
+            sigBytes += params->andSizeBytes;
+
+            memcpy(sigBytes, sig->proofs[t].msgsSecond, params->andSizeBytes);
             sigBytes += params->andSizeBytes;
 
             memcpy(sigBytes, sig->proofs[t].C, params->digestSizeBytes);
             sigBytes += params->digestSizeBytes;
+            counter++;
+            printf("counter at serialize: %zu \n",counter);
         }
     }
 
@@ -1454,7 +1528,7 @@ int serializeSignature2Blind(const signature2_t_blind * sig, uint8_t* sigBytes, 
 
 
 int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, const uint8_t* message,
-                 size_t messageByteLength, signature2_t_blind * sig, paramset_t* params,uint32_t* blindPrivateKey, uint32_t* blindPubKey)
+                 size_t messageByteLength, signature2_t_blind * sig, paramset_t* params,uint32_t* blindPrivateKey,  uint32_t* blindPubKey)
 {
     int ret = 0;
     tree_t* treeCv = NULL;
@@ -1624,35 +1698,40 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
     return ret;
 
 }
-int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const uint32_t* plaintext, const uint8_t* message, size_t messageByteLength,
+int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, const uint32_t* plaintext, const uint8_t* message, size_t messageByteLength,
                   paramset_t* params)
 {
-    commitments_t* C = allocateCommitments(params, 0);
+    commitments_t* C = allocateBlindCommitments(params, 0);
     commitments_t Ch = { 0 };
     commitments_t Cv = { 0 };
     msgs_t* msgs = allocateMsgs(params);
+    msgs_t* msgsSecond = allocateMsgs(params);
     tree_t* treeCv = createTree(params->numMPCRounds, params->digestSizeBytes);
     uint8_t challengeHash[MAX_DIGEST_SIZE];
-    tree_t** seeds = calloc(params->numMPCRounds, sizeof(tree_t*));
-    randomTape_t* tapes = malloc(params->numMPCRounds * sizeof(randomTape_t));
-    tree_t* iSeedsTree = createTree(params->numMPCRounds, params->seedSizeBytes);
+    tree_t** seeds = calloc(params->numMPCRounds*2, sizeof(tree_t*));
+    randomTape_t* tapes = malloc(params->numMPCRounds*2 * sizeof(randomTape_t));
+    tree_t* iSeedsTree = createTree(params->numMPCRounds*2, params->seedSizeBytes);
 
-    int ret = reconstructSeeds(iSeedsTree, sig->challengeC, params->numOpenedRounds, sig->iSeedInfo, sig->iSeedInfoLen, sig->salt, 0, params);
+    int ret = reconstructSeedsBlind(iSeedsTree, sig->challengeC, params->numOpenedRounds, sig->iSeedInfo,sig->iSeedInfoSecond, sig->iSeedInfoLen, sig->salt, 0, params);
     if (ret != 0) {
+        printf("Failed to reconstruct seeds for iSeedsTree");
         ret = -1;
         goto Exit;
     }
-
+    printf("ret is :%d",ret);
     /* Populate seeds with values from the signature */
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         if (!contains(sig->challengeC, params->numOpenedRounds, t)) {
             /* Expand iSeed[t] to seeds for each parties, using a seed tree */
             seeds[t] = generateSeeds(params->numMPCParties, getLeaf(iSeedsTree, t), sig->salt, t, params);
+            seeds[t+ params->numMPCRounds] = generateSeeds(params->numMPCParties, getLeaf(iSeedsTree, t+params->numMPCRounds), sig->salt, t+params->numMPCRounds, params);
+
         }
         else {
             /* We don't have the initial seed for the round, but instead a seed
              * for each unopened party */
             seeds[t] = createTree(params->numMPCParties, params->seedSizeBytes);
+            seeds[t+ params->numMPCRounds] = createTree(params->numMPCParties, params->seedSizeBytes);
             size_t P_index = indexOf(sig->challengeC, params->numOpenedRounds, t);
             uint16_t hideList[1];
             hideList[0] = sig->challengeP[P_index];
@@ -1660,7 +1739,16 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const
                                    sig->proofs[t].seedInfo, sig->proofs[t].seedInfoLen,
                                    sig->salt, t, params);
             if (ret != 0) {
-                PRINT_DEBUG(("Failed to reconstruct seeds for round %lu\n", t));
+                printf("Failed to reconstruct seeds for round %lu\n", t);
+                ret = -1;
+                goto Exit;
+            }
+
+            ret = reconstructSeeds(seeds[t+params->numMPCRounds], hideList, 1,
+                                   sig->proofs[t].seedInfoSecond, sig->proofs[t].seedInfoLen,
+                                   sig->salt, t+ params->numMPCRounds, params);
+            if (ret != 0) {
+                printf("Failed to reconstruct seeds for round %lu\n", t);
                 ret = -1;
                 goto Exit;
             }
@@ -1670,20 +1758,22 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const
     /* Commit */
     size_t last = params->numMPCParties - 1;
     uint8_t auxBits[MAX_AUX_BYTES] = {0,};
+    uint8_t auxBitsSecond[MAX_AUX_BYTES] = {0,};
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         /* Compute random tapes for all parties.  One party for each repitition
          * challengeC will have a bogus seed; but we won't use that party's
          * random tape. */
         createRandomTapes(&tapes[t], getLeaves(seeds[t]), sig->salt, t, params);
-
+        createRandomTapes(&tapes[t+params->numMPCRounds], getLeaves(seeds[t+params->numMPCRounds]), sig->salt, t+params->numMPCRounds, params);
         if (!contains(sig->challengeC, params->numOpenedRounds, t)) {
             /* We're given iSeed, have expanded the seeds, compute aux from scratch so we can comnpte Com[t] */
             computeAuxTape(&tapes[t], NULL, params);
+            computeAuxTape(&tapes[t+params->numMPCRounds], NULL, params);
             for (size_t j = 0; j < last; j++) {
-                commit(C[t].hashes[j], getLeaf(seeds[t], j), NULL, sig->salt, t, j, params);
+                commitBlind(C[t].hashes[j], getLeaf(seeds[t], j),getLeaf(seeds[t+params->numMPCRounds], j), NULL,NULL, sig->salt, t, j, params);
             }
             getAuxBits(auxBits, &tapes[t], params);
-            commit(C[t].hashes[last], getLeaf(seeds[t], last), auxBits, sig->salt, t, last, params);
+            commitBlind(C[t].hashes[last], getLeaf(seeds[t], last), getLeaf(seeds[t+params->numMPCRounds], last),auxBits,auxBitsSecond, sig->salt, t, last, params);
         }
         else {
             /* We're given all seeds and aux bits, execpt for the unopened
@@ -1691,11 +1781,11 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const
             size_t unopened = sig->challengeP[indexOf(sig->challengeC, params->numOpenedRounds, t)];
             for (size_t j = 0; j < last; j++) {
                 if (j != unopened) {
-                    commit(C[t].hashes[j], getLeaf(seeds[t], j), NULL, sig->salt, t, j, params);
+                    commitBlind(C[t].hashes[j], getLeaf(seeds[t], j),getLeaf(seeds[t+params->numMPCRounds], j),NULL, NULL, sig->salt, t, j, params);
                 }
             }
             if (last != unopened) {
-                commit(C[t].hashes[last], getLeaf(seeds[t], last), sig->proofs[t].aux, sig->salt, t, last, params);
+                commitBlind(C[t].hashes[last], getLeaf(seeds[t], last),getLeaf(seeds[t+params->numMPCRounds], last),sig->proofs[t].aux, sig->proofs[t].auxSecond, sig->salt, t, last, params);
             }
 
             memcpy(C[t].hashes[unopened], sig->proofs[t].C, params->digestSizeBytes);
@@ -1720,19 +1810,23 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const
             size_t tapeLengthBytes = getTapeSizeBytes(params);
             if(unopened != last) {  // sig->proofs[t].aux is only set when P_t != N
                 setAuxBits(&tapes[t], sig->proofs[t].aux, params);
+                setAuxBits(&tapes[t+params->numMPCRounds], sig->proofs[t].auxSecond, params);
             }
             memset(tapes[t].tape[unopened], 0, tapeLengthBytes);
             memcpy(msgs[t].msgs[unopened], sig->proofs[t].msgs, params->andSizeBytes);
             msgs[t].unopened = unopened;
-
-            int rv = simulateOnline((uint32_t*)sig->proofs[t].input, &tapes[t], tmp_shares, &msgs[t], plaintext, pubKey, params);
+            memset(tapes[t+params->numMPCRounds].tape[unopened], 0, tapeLengthBytes);
+            memcpy(msgsSecond[t].msgs[unopened], sig->proofs[t].msgsSecond, params->andSizeBytes);
+            msgsSecond[t].unopened = unopened;
+            //pubKey is just for debugging
+            int rv = simulateBlindOnline((uint32_t*)sig->proofs[t].input, &tapes[t], &tapes[t +params->numMPCRounds], tmp_shares, &msgs[t],&msgsSecond[t], plaintext, NULL, params,blindPubKey, (uint32_t*)sig->proofs[t].inputSecond);
             if (rv != 0) {
-                PRINT_DEBUG(("MPC simulation failed for round %lu, signature invalid\n", t));
+                printf("MPC simulation failed for round %lu, signature invalid\n", t);
                 freeShares(tmp_shares);
                 ret = -1;
                 goto Exit;
             }
-            commit_v(Cv.hashes[t], sig->proofs[t].input, &msgs[t], params);
+            commit_vBlind(Cv.hashes[t], sig->proofs[t].input,sig->proofs[t].inputSecond,  &msgs[t], &msgsSecond[t], params);
         }
         else {
             Cv.hashes[t] = NULL;
@@ -1745,22 +1839,25 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const
     ret = addMerkleNodes(treeCv, missingLeaves, missingLeavesSize, sig->cvInfo, sig->cvInfoLen);
     free(missingLeaves);
     if (ret != 0) {
+        printf("Fail at addMerkleNodes");
         ret = -1;
         goto Exit;
     }
 
     ret = verifyMerkleTree(treeCv, Cv.hashes, sig->salt, params);
     if (ret != 0) {
+        printf("Fail at verifyMerkleTree");
         ret = -1;
         goto Exit;
     }
 
     /* Compute the challenge hash */
-    HCP(challengeHash, NULL, NULL, &Ch, treeCv->nodes[0], sig->salt, pubKey, plaintext, message, messageByteLength, params);
+    HCPBlind(challengeHash, NULL, NULL, &Ch, treeCv->nodes[0], sig->salt, blindPubKey, plaintext, message, messageByteLength, params);
 
     /* Compare to challenge from signature */
     if ( memcmp(sig->challengeHash, challengeHash, params->digestSizeBytes) != 0) {
         PRINT_DEBUG(("Challenge does not match, signature invalid\n"));
+        printf("Fail at created Challenge");
         ret = -1;
         goto Exit;
     }
@@ -1769,13 +1866,14 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* pubKey, const
 
     Exit:
 
-    freeCommitments(C);
+    freeBlindCommitments(C);
     freeCommitments2(&Cv);
     freeCommitments2(&Ch);
     freeMsgs(msgs);
+    freeMsgs(msgsSecond);
     freeTree(treeCv);
     freeTree(iSeedsTree);
-    for (size_t t = 0; t < params->numMPCRounds; t++) {
+    for (size_t t = 0; t < params->numMPCRounds*2; t++) {
         freeRandomTape(&tapes[t]);
         freeTree(seeds[t]);
     }

@@ -41,6 +41,17 @@ int exists(tree_t* tree, size_t i)
     }
     return 0;
 }
+int existsBlind(tree_blind_t* tree, size_t i)
+{
+    if (i >= tree->numNodes) {
+        return 0;
+    }
+    if (tree->exists[i]) {
+        return 1;
+    }
+    return 0;
+}
+
 
 tree_t* createTree(size_t numLeaves, size_t dataSize)
 {
@@ -84,6 +95,56 @@ void freeTree(tree_t* tree)
         free(tree);
     }
 }
+
+tree_blind_t* createBlindTree(size_t numLeaves, size_t dataSize)
+{
+    tree_blind_t * tree = malloc(sizeof(tree_t));
+
+    tree->depth = ceil_log2(numLeaves) + 1;
+    tree->numNodes = ((1 << (tree->depth)) - 1) - ((1 << (tree->depth - 1)) - numLeaves);  /* Num nodes in complete - number of missing leaves */
+    tree->numLeaves = numLeaves;
+    tree->dataSize = dataSize;
+    tree->doubleData.nodes = malloc(tree->numNodes * sizeof(uint8_t*));
+    tree->doubleData.nodesSecond = malloc(tree->numNodes * sizeof(uint8_t*));
+
+    uint8_t* slab = calloc(tree->numNodes*2, dataSize);
+
+    for (size_t i = 0; i < tree->numNodes; i++) {
+        tree->doubleData.nodes [i] = slab;
+        slab += dataSize;
+    }
+    for (size_t i = 0; i < tree->numNodes; i++) {
+        tree->doubleData.nodesSecond [i] = slab;
+        slab += dataSize;
+    }
+    tree->haveNode = calloc(tree->numNodes, 1);
+
+    /* Depending on the number of leaves, the tree may not be complete */
+    tree->exists = calloc(tree->numNodes, 1);
+    memset(tree->exists + tree->numNodes - tree->numLeaves, 1, tree->numLeaves);    /* Set leaves */
+    for (int i = tree->numNodes - tree->numLeaves; i > 0; i--) {
+        if (existsBlind(tree, 2 * i + 1) || existsBlind(tree, 2 * i + 2) ) {
+            tree->exists[i] = 1;
+        }
+    }
+    tree->exists[0] = 1;
+
+    return tree;
+}
+
+void freeBlindTree(tree_blind_t* tree)
+{
+    if (tree != NULL) {
+        free(tree->doubleData.nodes[0]);
+        free(tree->doubleData.nodes);
+        free(tree->doubleData.nodesSecond[0]);
+        free(tree->doubleData.nodesSecond);
+        free(tree->haveNode);
+        free(tree->exists);
+        free(tree);
+    }
+}
+
 int isLeftChild(size_t node)
 {
     assert(node != 0);
@@ -120,6 +181,36 @@ uint8_t* getLeaf(tree_t* tree, size_t leafIndex)
     return tree->nodes[firstLeaf + leafIndex];
 }
 
+int hasRightChildBlind(tree_blind_t* tree, size_t node)
+{
+    return(2 * node + 2 < tree->numNodes && existsBlind(tree, node));
+}
+int hasLeftChildBlind(tree_blind_t* tree, size_t node)
+{
+    return(2 * node + 1 < tree->numNodes);
+}
+
+
+uint8_t** getLeavesBlindFirst(tree_blind_t* tree)
+{
+    return &tree->doubleData.nodes[tree->numNodes - tree->numLeaves];
+}
+uint8_t** getLeavesBlindSecond(tree_blind_t* tree)
+{
+    return &tree->doubleData.nodesSecond[tree->numNodes - tree->numLeaves];
+}
+uint8_t* getLeafBlindFirst(tree_blind_t * tree, size_t leafIndex)
+{
+    assert(leafIndex < tree->numLeaves);
+    size_t firstLeaf = tree->numNodes - tree->numLeaves;
+    return tree->doubleData.nodes[firstLeaf + leafIndex];
+}
+uint8_t* getLeafBlindSecond(tree_blind_t * tree, size_t leafIndex)
+{
+    assert(leafIndex < tree->numLeaves);
+    size_t firstLeaf = tree->numNodes - tree->numLeaves;
+    return tree->doubleData.nodesSecond[firstLeaf + leafIndex];
+}
 void hashSeed(uint8_t* digest, const uint8_t* inputSeed, uint8_t* salt, uint8_t hashPrefix, size_t repIndex, size_t nodeIndex, paramset_t* params)
 {
     HashInstance ctx;
@@ -165,6 +256,40 @@ void expandSeeds(tree_t* tree, uint8_t* salt, size_t repIndex, paramset_t* param
 
 }
 
+void expandSeedsBlind(tree_blind_t * tree, uint8_t* salt, size_t repIndex, paramset_t* params)
+{
+    uint8_t tmp[2*MAX_SEED_SIZE_BYTES];
+    uint8_t tmp2[2*MAX_SEED_SIZE_BYTES];
+    /* Walk the tree, expanding seeds where possible. Compute children of
+     * non-leaf nodes. */
+    size_t lastNonLeaf = getParent(tree->numNodes - 1);
+
+    for (size_t i = 0; i <= lastNonLeaf; i++) {
+        if (!tree->haveNode[i]) {
+            continue;
+        }
+
+        hashSeed(tmp, tree->doubleData.nodes[i], salt, HASH_PREFIX_1, repIndex, i, params);
+        hashSeed(tmp2, tree->doubleData.nodesSecond[i], salt, HASH_PREFIX_1, repIndex, i, params);
+        if (!tree->haveNode[2 * i + 1]) {
+            /* left child = H_left(seed_i || salt || t || i) */
+            memcpy(tree->doubleData.nodes[2 * i + 1], tmp, params->seedSizeBytes);
+            memcpy(tree->doubleData.nodesSecond[2 * i + 1], tmp2, params->seedSizeBytes);
+            tree->haveNode[2 * i + 1] = 1;
+        }
+
+        /* The last non-leaf node will only have a left child when there are an odd number of leaves */
+        if (existsBlind(tree, 2 * i + 2) && !tree->haveNode[2 * i + 2]) {
+            /* right child = H_right(seed_i || salt || t || i)  */
+            memcpy(tree->doubleData.nodes[2 * i + 2], tmp + params->seedSizeBytes, params->seedSizeBytes);
+            memcpy(tree->doubleData.nodesSecond[2 * i + 2], tmp2 + params->seedSizeBytes, params->seedSizeBytes);
+            tree->haveNode[2 * i + 2] = 1;
+        }
+
+    }
+
+}
+
 tree_t* generateSeeds(size_t nSeeds, uint8_t* rootSeed, uint8_t* salt, size_t repIndex, paramset_t* params)
 {
     tree_t* tree = createTree(nSeeds, params->seedSizeBytes);
@@ -180,7 +305,10 @@ int isLeafNode(tree_t* tree, size_t node)
 {
     return (2 * node + 1 >= tree->numNodes);
 }
-
+int isLeafNodeBlind(tree_blind_t* tree, size_t node)
+{
+    return (2 * node + 1 >= tree->numNodes);
+}
 int hasSibling(tree_t* tree, size_t node)
 {
     if (!exists(tree, node)) {
@@ -193,7 +321,18 @@ int hasSibling(tree_t* tree, size_t node)
 
     return 1;
 }
+int hasSiblingBlind(tree_blind_t* tree, size_t node)
+{
+    if (!existsBlind(tree, node)) {
+        return 0;
+    }
 
+    if (isLeftChild(node) && !existsBlind(tree, node + 1)) {
+        return 0;
+    }
+
+    return 1;
+}
 size_t getSibling(tree_t* tree, size_t node)
 {
     assert(node < tree->numNodes);
@@ -213,7 +352,25 @@ size_t getSibling(tree_t* tree, size_t node)
         return node - 1;
     }
 }
+size_t getSiblingBlind(tree_blind_t* tree, size_t node)
+{
+    assert(node < tree->numNodes);
+    assert(node != 0);
+    assert(hasSiblingBlind(tree, node));
 
+    if (isLeftChild(node)) {
+        if (node + 1 < tree->numNodes) {
+            return node + 1;
+        }
+        else {
+            assert(!"getSibling: request for node with not sibling");
+            return 0;
+        }
+    }
+    else {
+        return node - 1;
+    }
+}
 void printSeeds(uint8_t* seedsBuf, size_t seedLen, size_t numSeeds)
 {
     for (size_t i = 0; i < numSeeds; i++) {
@@ -290,12 +447,69 @@ static size_t* getRevealedNodes(tree_t* tree, uint16_t* hideList, size_t hideLis
     return revealed;
 }
 
+/* Returns the number of bytes written to output */
+static size_t* getRevealedNodesBlind(tree_blind_t* tree, uint16_t* hideList, size_t hideListSize, size_t* outputSize)
+{
+    /* Compute paths up from hideList to root, store as sets of nodes */
+    size_t pathLen = tree->depth - 1;
+
+    /* pathSets[i][0...hideListSize] stores the nodes in the path at depth i
+     * for each of the leaf nodes in hideListSize */
+    size_t** pathSets = malloc(pathLen * sizeof(size_t*));
+    size_t* slab = malloc(hideListSize * pathLen * sizeof(size_t));
+
+    for (size_t i = 0; i < pathLen; i++) {
+        pathSets[i] = slab;
+        slab += hideListSize;
+    }
+
+    /* Compute the paths back to the root */
+    for (size_t i = 0; i < hideListSize; i++) {
+        size_t pos = 0;
+        size_t node = hideList[i] + (tree->numNodes - tree->numLeaves); /* input lists leaf indexes, translate to nodes */
+        pathSets[pos][i] = node;
+        pos++;
+        while ( (node = getParent(node)) != 0 ) {
+            pathSets[pos][i] = node;
+            pos++;
+        }
+    }
+
+    /* Determine seeds to reveal */
+    size_t* revealed = malloc(tree->numLeaves * sizeof(size_t));
+    size_t revealedPos = 0;
+    for (size_t d = 0; d < pathLen; d++) {
+        for (size_t i = 0; i < hideListSize; i++) {
+            if (!hasSiblingBlind(tree, pathSets[d][i])) {
+                continue;
+            }
+            size_t sibling = getSiblingBlind(tree, pathSets[d][i]);
+            if (!contains(pathSets[d], hideListSize, sibling )) {
+                // Determine the seed to reveal
+                while(!hasRightChildBlind(tree, sibling) && !isLeafNodeBlind(tree, sibling)) {
+                    sibling = 2 * sibling + 1; // sibling = leftChild(sibling)
+                }
+
+                // Only reveal if we haven't already
+                if (!contains(revealed, revealedPos, sibling)) {
+                    revealed[revealedPos] = sibling;
+                    revealedPos++;
+                }
+            }
+        }
+    }
+
+    free(pathSets[0]);
+    free(pathSets);
+
+    *outputSize = revealedPos;
+    return revealed;
+}
 size_t revealSeedsSize(size_t numNodes, uint16_t* hideList, size_t hideListSize, paramset_t* params)
 {
     tree_t* tree = createTree(numNodes, params->seedSizeBytes);
     size_t numNodesRevealed = 0;
     size_t* revealed = getRevealedNodes(tree, hideList, hideListSize, &numNodesRevealed);
-
     freeTree(tree);
     free(revealed);
     return numNodesRevealed * params->seedSizeBytes;
@@ -329,24 +543,29 @@ size_t revealSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize, uint8_
     return output - outputBase;
 }
 
-size_t revealBlindSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize, uint8_t* output,uint8_t* outputSecond,  size_t outputSize, paramset_t* params)
+size_t revealBlindSeedsSize(size_t numNodes, uint16_t* hideList, size_t hideListSize, paramset_t* params)
+{
+    tree_blind_t* tree = createBlindTree(numNodes, params->seedSizeBytes);
+    size_t numNodesRevealed = 0;
+    size_t* revealed = getRevealedNodesBlind(tree, hideList, hideListSize, &numNodesRevealed);
+    printf("numNodesRevealed:%zu\n at revealseedsize",numNodesRevealed);
+    freeBlindTree(tree);
+    free(revealed);
+    return numNodesRevealed * params->seedSizeBytes;
+}
+size_t revealBlindSeeds(tree_blind_t * tree, uint16_t* hideList, size_t hideListSize, uint8_t* output,uint8_t* outputSecond,  size_t outputSize, paramset_t* params)
 {
     uint8_t* outputBase = output;
-    uint8_t outputBaseS = *outputSecond*params->numMPCRounds;
-    printf("%hhu",outputBaseS);
     size_t revealedSize = 0;
 
     if (outputSize > INT_MAX) {
         return -1;
     }
     int outLen = (int)outputSize;
-printf("Tree.numnodes: %zu\n",tree->numNodes);
-    printf("Tree.numLeaves: %zu\n",tree->numLeaves);
 
-    size_t* revealed = getRevealedNodes(tree, hideList, hideListSize, &revealedSize);
-    for (size_t i = 0; i < revealedSize; i++) {
-        printf("%zu ",revealed[i]);
-    }
+
+    size_t* revealed = getRevealedNodesBlind(tree, hideList, hideListSize, &revealedSize);
+    printf("revealedSize:%zu at revealBlindSeeds\n ",revealedSize);
     for (size_t i = 0; i < revealedSize; i++) {
         outLen -= params->seedSizeBytes ;
         if (outLen < 0) {
@@ -354,8 +573,8 @@ printf("Tree.numnodes: %zu\n",tree->numNodes);
             free(revealed);
             return 0;
         }
-        memcpy(output, tree->nodes[revealed[i]], params->seedSizeBytes);
-        memcpy(outputSecond, tree->nodes[revealed[i]+params->numMPCRounds], params->seedSizeBytes);
+        memcpy(output, tree->doubleData.nodes[revealed[i]], params->seedSizeBytes);
+        memcpy(outputSecond, tree->doubleData.nodesSecond[revealed[i]], params->seedSizeBytes);
         output += params->seedSizeBytes;
         outputSecond += params->seedSizeBytes;
     }
@@ -390,6 +609,46 @@ int reconstructSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize,
     }
 
     expandSeeds(tree, salt, repIndex, params);
+
+    Exit:
+    free(revealed);
+    return ret;
+}
+int reconstructSeedsBlind(tree_blind_t * tree, uint16_t* hideList, size_t hideListSize,
+                     uint8_t* input,      uint8_t* inputSecond, size_t inputLen, uint8_t* salt, size_t repIndex, paramset_t* params)
+{
+    int ret =  0;
+
+    if (inputLen > INT_MAX) {
+        return -1;
+    }
+    int inLen = (int)inputLen;
+    int inLenSecond = (int)inputLen;
+    size_t revealedSize = 0;
+    size_t* revealed = getRevealedNodesBlind(tree, hideList, hideListSize, &revealedSize);
+    for (size_t i = 0; i < revealedSize; i++) {
+        inLen -= params->seedSizeBytes;
+        inLenSecond -= params->seedSizeBytes;
+        if (inLen < 0) {
+            ret = -1;
+            goto Exit;
+        }
+        if (inLenSecond < 0) {
+            ret = -1;
+            goto Exit;
+        }
+
+        memcpy(tree->doubleData.nodes[revealed[i]], input, params->seedSizeBytes);
+        tree->haveNode[revealed[i]] = 1;
+        input += params->seedSizeBytes;
+
+        memcpy(tree->doubleData.nodesSecond[revealed[i]], inputSecond, params->seedSizeBytes);
+        tree->haveNode[revealed[i+params->numMPCRounds]] = 1;
+        inputSecond += params->seedSizeBytes;
+
+    }
+
+    expandSeedsBlind(tree, salt, repIndex, params);
 
 Exit:
     free(revealed);

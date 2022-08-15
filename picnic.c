@@ -368,8 +368,9 @@ int picnic_validate_blind_keypair( const picnic_publickey_t* publickey, const pi
         return -1;
     }
 
-    printHex("\n@Valid_Blind_Pair  pk->ciphertext:",publickey->ciphertext,paramset->stateSizeBytes);
+   /* printHex("\n@Valid_Blind_Pair  pk->ciphertext:",publickey->ciphertext,paramset->stateSizeBytes);
     printHex("@Valid_Blind_Pair  pkBlind->ciphertext:",pkBlind->ciphertext,paramset->stateSizeBytes);
+    */
     printf("Valid blind-key pair\n");
     return 0;
 }
@@ -514,7 +515,7 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
         }
         ret = serializeSignature2Blind(sig, signature, *signature_len, &paramset);
         if (ret == -1) {
-            PRINT_DEBUG(("Failed to serialize signature\n"));
+            printf("Failed to serialize signature\n");
             fflush(stderr);
             freeSignature2Blind(sig, &paramset);
             free(sig);
@@ -552,13 +553,19 @@ size_t picnic_blind_signature_size(picnic_params_t parameters) //TODO
                              + paramset.andSizeBytes + paramset.stateSizeBytes            // circuit size, size of aux info
                              + paramset.digestSizeBytes                                   // size of commitment of unopened party
                              + paramset.stateSizeBytes                                    // masked input
-                             + paramset.andSizeBytes;                                     //size of broadcast messages
+                             + paramset.andSizeBytes                             //size of broadcast messages
+        + paramset.stateSizeBytes                                    // masked input
+        + paramset.andSizeBytes                                    //size of broadcast messages
+        + paramset.stateSizeBytes            //  size of aux info
+        + paramset.seedSizeBytes * ceil_log2(paramset.numMPCParties); // Info to recompute seeds
 
         size_t signatureSize =   paramset.saltSizeBytes                                 // salt
                                  + paramset.digestSizeBytes                               // challenge hash
                                  + numTreeValues * paramset.seedSizeBytes                 // iSeed info
                                  + numTreeValues * paramset.digestSizeBytes               // commitment opening info for views
-                                 + proofSize * u;                                         // one proof per challenged execution
+                                 + proofSize * u                                         // one proof per challenged execution
+                                   + numTreeValues * paramset.seedSizeBytes ;                // iSeed info
+
         return signatureSize;
     }
 
@@ -738,12 +745,13 @@ int picnic_verify_blinded(picnic_publickey_t* pk, const uint8_t* message, size_t
         signature2_t_blind * sig = (signature2_t_blind *)malloc(sizeof(signature2_t_blind));
         allocateSignature2Blind(sig, &paramset);
         if (sig == NULL) {
+            printf("Sig is null after allocate :%d",ret);
             return -1;
         }
 
         ret = deserializeSignature2Blind(sig, signature, signature_len, &paramset);
         if (ret != EXIT_SUCCESS) {
-            PRINT_DEBUG(("Failed to deserialize signature\n"));
+            printf("Failed to deserialize signatur for Picnic 3 at picnic.c \n");
             freeSignature2Blind(sig, &paramset);
             free(sig);
             return -1;
@@ -770,6 +778,7 @@ int picnic_verify_blinded(picnic_publickey_t* pk, const uint8_t* message, size_t
 int picnic_write_public_key(const picnic_publickey_t* key, uint8_t* buf, size_t buflen)
 {
     if (key == NULL || buf == NULL) {
+        printf("key == NULL || buf == NULL");
         return -1;
     }
 
