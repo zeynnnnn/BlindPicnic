@@ -24,13 +24,15 @@ typedef struct tree_t {
     size_t numNodes;    /* The total number of nodes in the tree */
     size_t numLeaves;   /* The total number of leaves in the tree */
 } tree_t;
+
 typedef struct double_data{
     uint8_t** nodes;
     uint8_t** nodesSecond;
 }double_data;
+
 typedef struct tree_blind_t {
     size_t depth;       /* The depth of the tree */
-    double_data doubleData;    /* The data for each node */
+    double_data * doubleData;    /* The double data for each node */
     size_t dataSize;    /* The size data at each node, in bytes */
     uint8_t* haveNode;  /* If we have the data (seed or hash) for node i, haveSeed[i] is 1 */
     uint8_t* exists;    /* Since the tree is not always complete, nodes marked 0 don't exist */
@@ -78,12 +80,17 @@ int reconstructSeeds(tree_t* tree, uint16_t* hideList, size_t hideListSize, uint
  *      3. verifyMerkleTree     Checks that all leaf nodes present are correct commitments
  *      4. freeTree
  */
+
 void buildMerkleTree(tree_t* tree, uint8_t** leafData, uint8_t* salt, paramset_t* params);
 uint8_t* openMerkleTree(tree_t* tree, uint16_t* missingLeaves, size_t missingLeavesSize, size_t* outputSizeBytes);
 size_t openMerkleTreeSize(size_t numNodes, uint16_t* notMissingLeaves, size_t notMissingLeavesSize, paramset_t* params);
 int addMerkleNodes(tree_t* tree, uint16_t* missingLeaves, size_t missingLeavesSize, uint8_t* input, size_t inputSize);
 int verifyMerkleTree(tree_t* tree, uint8_t** leafData, uint8_t* salt, paramset_t* params);
-
+uint8_t* getLeafBlindFirst(tree_blind_t * tree, size_t leafIndex);
+uint8_t* getLeafBlindSecond(tree_blind_t * tree, size_t leafIndex);
+uint8_t** getLeavesBlindFirst(tree_blind_t* tree);
+uint8_t** getLeavesBlindSecond(tree_blind_t* tree);
+tree_blind_t* generateSeedsBlind(size_t nSeeds, uint8_t* rootSeed,  uint8_t* secondRootSeed,uint8_t* salt, size_t repIndex, paramset_t* params);
 int reconstructSeedsBlind(tree_blind_t* tree, uint16_t* hideList, size_t hideListSize,
                           uint8_t* input,      uint8_t* inputSecond, size_t inputLen, uint8_t* salt, size_t repIndex, paramset_t* params);
 size_t revealBlindSeedsSize(size_t numNodes, uint16_t* hideList, size_t hideListSize, paramset_t* params);
