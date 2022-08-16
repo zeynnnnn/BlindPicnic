@@ -400,6 +400,26 @@ void printLeaves(tree_t* tree)
     printSeeds(tree->nodes[firstLeaf], tree->dataSize, tree->numLeaves);
 
 }
+void printSeedsBlind(double_data*  seedsBuf, size_t firstLeaf ,size_t seedLen, size_t numSeeds)
+{
+    uint8_t *seeds=seedsBuf->nodes[firstLeaf];
+    uint8_t *seedsSecond=seedsBuf->nodesSecond[firstLeaf];
+    for (size_t i = 0; i < numSeeds; i++) {
+        printf("seed first %lu", i);
+        printHex("", seeds, seedLen);
+        printf("seed second %lu", i);
+        printHex("", seedsSecond, seedLen);
+        seeds += seedLen;
+        seedsSecond+= seedLen;
+    }
+}
+void printLeavesBlind(tree_blind_t* tree)
+{
+    size_t firstLeaf = tree->numNodes - tree->numLeaves;
+    printf("Number of the leaves:%zu\n", tree->numLeaves);
+    printSeedsBlind(tree->doubleData,firstLeaf, tree->dataSize, tree->numLeaves);
+
+}
 
 /* Returns the number of bytes written to output */
 static size_t* getRevealedNodes(tree_t* tree, uint16_t* hideList, size_t hideListSize, size_t* outputSize)

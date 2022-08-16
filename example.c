@@ -118,7 +118,7 @@ int picnicBlindExample(picnic_params_t parameters)
 
     ret = picnic_verify_blinded(&pkBlind, message, sizeof(message), signature, signature_len);
     if (ret != 0) {
-        printf("picnic_verify failed after de-serializing public key\n");
+        printf("picnic_verify_blinded failed after de-serializing public key\n");
         //exit(-1);
     }
     printf(" success\n");
@@ -140,7 +140,7 @@ int picnicBlindExample(picnic_params_t parameters)
 
     ret = picnic_validate_blind_keypair( &pk,&skBlind,&pkBlind);
     if (ret != 0) {
-        printf("Keypair invalid after deserializing private key\n");
+        printf("Blind Keypair invalid after deserializing private key\n");
         exit(-1);
     }
     printf(" success\n\n");

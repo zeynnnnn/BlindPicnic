@@ -535,7 +535,6 @@ if (pubKey!=NULL){
         roundKey[i] =0;
     }
 
-
     matrix_mul(roundKey, blindMaskedKey, KMatrix(0, params), params);        // roundKey = maskedKey * KMatrix[0]
     xor_array(state, roundKey, state, params->stateSizeWords);      // state = plaintext(state) + roundKey
 
@@ -549,11 +548,10 @@ if (pubKey!=NULL){
     }
     if(memcmp(state, blindPubKey, params->stateSizeBytes) != 0) {
         printf("Failed in second comparison for state blindpubkey!");
-#ifdef DEBUG
-        printf("%s: Blindoutput does not match pubKey\n", __func__);
-        printHex("pubKey", (uint8_t*)blindPubKey, params->stateSizeBytes);
+        //printf("%s: Blindoutput does not match pubKey\n", __func__);
+        printHex("blindpubKey", (uint8_t*)blindPubKey, params->stateSizeBytes);
         printHex("output", (uint8_t*)state, params->stateSizeBytes);
-#endif
+
         ret = -1;
         goto Exit;
     }
@@ -742,8 +740,8 @@ static void HCPBlind(uint8_t* challengeHash, uint16_t* challengeC, uint16_t* cha
     HashInstance ctx;
 
     assert(params->numOpenedRounds < params->numMPCRounds);
-
-#if 0  // Print out inputs when debugging
+#if 0
+ // Print out inputs when debugging
     printf("\n");
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         printf("%s Ch[%lu]", __func__, t);
@@ -992,6 +990,7 @@ int sign_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, co
         seeds[t] = generateSeeds(params->numMPCParties, iSeeds[t], sig->salt, t, params);
         createRandomTapes(&tapes[t], getLeaves(seeds[t]), sig->salt, t, params);
     }
+
 
     /* Preprocessing; compute aux tape for the N-th player, for each parallel rep */
     inputs_t inputs = allocateInputs(params);
@@ -1307,7 +1306,7 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
     sigBytes += params->saltSizeBytes;
 
     expandChallengeHash(sig->challengeHash, sig->challengeC, sig->challengeP, params);
-    printHex("deserialize challengeC", (const uint8_t *) sig->challengeC, params->digestSizeBytes);
+    //printHex("deserialize challengeC", (const uint8_t *) sig->challengeC, params->digestSizeBytes);
     /* Add size of iSeeds tree data */
     sig->iSeedInfoLen = revealBlindSeedsSize(params->numMPCRounds, sig->challengeC, params->numOpenedRounds, params);
     bytesRequired += sig->iSeedInfoLen;
@@ -1321,7 +1320,7 @@ printHex("salt", sigBytes + params->digestSizeBytes, params->saltSizeBytes);
     sig->cvInfoLen = openMerkleTreeSize(params->numMPCRounds, missingLeaves, missingLeavesSize, params);
     bytesRequired += sig->cvInfoLen;
     free(missingLeaves);
-    printf("Before deserialize:  sigBytes:%zu  and sig->iSeedInfoLen:%zu\\n",bytesRequired,sig->iSeedInfoLen);
+    //printf("Before deserialize:  sigBytes:%zu  and sig->iSeedInfoLen:%zu\\n",bytesRequired,sig->iSeedInfoLen);
     /* Compute the number of bytes required for the proofs */
     uint16_t hideList[1] = { 0 };
     size_t seedInfoLen = revealSeedsSize(params->numMPCParties, hideList, 1, params);
@@ -1470,7 +1469,7 @@ int serializeSignature2Blind(const signature2_t_blind * sig, uint8_t* sigBytes, 
 
     memcpy(sigBytes, sig->challengeHash, params->digestSizeBytes);
     sigBytes += params->digestSizeBytes;
-    printHex("Serialize challengeC", (const uint8_t *) sig->challengeC, params->digestSizeBytes);
+    //printHex("Serialize challengeC", (const uint8_t *) sig->challengeC, params->digestSizeBytes);
     memcpy(sigBytes, sig->salt, params->saltSizeBytes);
     sigBytes += params->saltSizeBytes;
 
@@ -1483,7 +1482,7 @@ int serializeSignature2Blind(const signature2_t_blind * sig, uint8_t* sigBytes, 
 
     memcpy(sigBytes, sig->cvInfo, sig->cvInfoLen);
     sigBytes += sig->cvInfoLen;
-    printf("Before serialize:  sigBytes:%zu and sig->iSeedInfoLen:%zu\n",sigBytes - sigBytesBase,sig->iSeedInfoLen);
+    //printf("Before serialize:  sigBytes:%zu and sig->iSeedInfoLen:%zu\n",sigBytes - sigBytesBase,sig->iSeedInfoLen);
     /* Write the proofs */
     size_t counter=0;
     for (size_t t = 0; t < params->numMPCRounds; t++) {
@@ -1560,6 +1559,8 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
     }
     //printf("inputs[t+params->numMPCRounds]:%s\n",inputs[params->numMPCRounds]);
     /* Commit to seeds and aux bits */
+    //printf("Round %d at sign\n",0);
+    //printLeavesBlind(seeds[0]);
     commitments_t* blindC = allocateBlindCommitments(params, 0);
     for (size_t t = 0; t < params->numMPCRounds; t++) {
 
@@ -1576,7 +1577,7 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
 
     /* Simulate the online phase of the MPC */
     msgs_t* msgs = allocateMsgs(params); //DOubled the msgs
-    msgs_t* msgsSecond = allocateMsgs(params); //TODO free
+    msgs_t* msgsSecond = allocateMsgs(params);
     shares_t* tmp_shares = allocateShares(params->stateSizeBits);
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         uint32_t* maskedKey = (uint32_t*)inputs[t];
@@ -1585,7 +1586,8 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
         xor_array(blindMaskedKey, blindMaskedKey, blindPrivateKey, params->stateSizeWords);
         int rv = simulateBlindOnline(maskedKey, &blindTapes[t],&blindTapes[t +params->numMPCRounds], tmp_shares, &msgs[t],&msgsSecond[t], plaintext, pubKey, params,blindPubKey,blindMaskedKey);
         if (rv != 0) {
-            PRINT_DEBUG(("MPC simulation failed, aborting signature\n"));
+            printf(("MPC simulation failed, aborting signature\n"));
+
             freeShares(tmp_shares);
             ret = -1;
             goto Exit;
@@ -1644,7 +1646,7 @@ int sign_blind_picnic3(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plainte
             proofs[t].seedInfoLen = revealBlindSeeds(seeds[t], hideList, 1, proofs[t].seedInfo,proofs[t].seedInfoSecond, params->numMPCParties * params->seedSizeBytes, params);
             //printf("First seedInfoLen :%zu", proofs[t].seedInfoLen);
             proofs[t].seedInfo = realloc(proofs[t].seedInfo, proofs[t].seedInfoLen);
-            proofs[t].seedInfoSecond = realloc(proofs[t].seedInfoSecond, proofs[t].seedInfoLen);     //TODO:Could go so rwrong
+            proofs[t].seedInfoSecond = realloc(proofs[t].seedInfoSecond, proofs[t].seedInfoLen);
 
             size_t last = params->numMPCParties - 1;
             if (challengeP[P_index] != last) {
@@ -1718,12 +1720,13 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
         ret = -1;
         goto Exit;
     }
-    printHex("@Verrify sig->iSeedInfo is :",sig->iSeedInfo,params->seedSizeBytes);
-    printHex("@Verrify sig->iSeedInfoSecond is :",sig->iSeedInfoSecond,params->seedSizeBytes);
+
+    //printHex("@Verrify sig->iSeedInfo is :",sig->iSeedInfo,params->seedSizeBytes);
+    //printHex("@Verrify sig->iSeedInfoSecond is :",sig->iSeedInfoSecond,params->seedSizeBytes);
     /* Populate seeds with values from the signature */
     for (size_t t = 0; t < params->numMPCRounds; t++) {
         if (!contains(sig->challengeC, params->numOpenedRounds, t)) {
-            /* Expand iSeed[t] to seeds for each parties, using a seed tree */
+            /* Expand iSeed[t] to seeds for each party, using a seed tree */
             seeds[t] = generateSeedsBlind(params->numMPCParties, getLeafBlindFirst(iSeedsTree, t),getLeafBlindSecond(iSeedsTree, t),  sig->salt, t, params);
         }
         else {
@@ -1744,6 +1747,7 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
         }
     }
 
+
     /* Commit */
     size_t last = params->numMPCParties - 1;
     uint8_t auxBits[MAX_AUX_BYTES] = {0,};
@@ -1753,7 +1757,7 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
          * challengeC will have a bogus seed; but we won't use that party's
          * random tape. */
         createRandomTapes(&tapes[t], getLeavesBlindFirst(seeds[t]), sig->salt, t, params);
-        createRandomTapes(&tapes[t+params->numMPCRounds], getLeavesBlindSecond(seeds[t]), sig->salt, t+params->numMPCRounds, params);
+        createRandomTapes(&tapes[t+params->numMPCRounds], getLeavesBlindSecond(seeds[t]), sig->salt, t, params);
         if (!contains(sig->challengeC, params->numOpenedRounds, t)) {
             /* We're given iSeed, have expanded the seeds, compute aux from scratch so we can comnpte Com[t] */
             computeAuxTape(&tapes[t], NULL, params);
@@ -1762,6 +1766,7 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
                 commitBlind(C[t].hashes[j], getLeafBlindFirst(seeds[t], j),getLeafBlindSecond(seeds[t], j), NULL,NULL, sig->salt, t, j, params);
             }
             getAuxBits(auxBits, &tapes[t], params);
+            getAuxBits(auxBitsSecond, &tapes[t+params->numMPCRounds], params);
             commitBlind(C[t].hashes[last], getLeafBlindFirst(seeds[t], last), getLeafBlindSecond(seeds[t], last),auxBits,auxBitsSecond, sig->salt, t, last, params);
         }
         else {
@@ -1802,15 +1807,22 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
                 setAuxBits(&tapes[t+params->numMPCRounds], sig->proofs[t].auxSecond, params);
             }
             memset(tapes[t].tape[unopened], 0, tapeLengthBytes);
+            memset(tapes[t+params->numMPCRounds].tape[unopened], 0, tapeLengthBytes);
+
             memcpy(msgs[t].msgs[unopened], sig->proofs[t].msgs, params->andSizeBytes);
             msgs[t].unopened = unopened;
-            memset(tapes[t+params->numMPCRounds].tape[unopened], 0, tapeLengthBytes);
+
             memcpy(msgsSecond[t].msgs[unopened], sig->proofs[t].msgsSecond, params->andSizeBytes);
             msgsSecond[t].unopened = unopened;
             //pubKey is just for debugging
             int rv = simulateBlindOnline((uint32_t*)sig->proofs[t].input, &tapes[t], &tapes[t +params->numMPCRounds], tmp_shares, &msgs[t],&msgsSecond[t], plaintext, NULL, params,blindPubKey, (uint32_t*)sig->proofs[t].inputSecond);
+
             if (rv != 0) {
                 printf("MPC simulation failed for round %lu, signature invalid\n", t);
+                printf("Round %zu at verify\n",t);
+                printLeavesBlind(seeds[t]);
+                printf("Round %d at verify\n",0);
+                printLeavesBlind(seeds[0]);
                 freeShares(tmp_shares);
                 ret = -1;
                 goto Exit;
@@ -1828,14 +1840,14 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
     ret = addMerkleNodes(treeCv, missingLeaves, missingLeavesSize, sig->cvInfo, sig->cvInfoLen);
     free(missingLeaves);
     if (ret != 0) {
-        printf("Fail at addMerkleNodes");
+        printf("Fail at addMerkleNodes\n");
         ret = -1;
         goto Exit;
     }
 
     ret = verifyMerkleTree(treeCv, Cv.hashes, sig->salt, params);
     if (ret != 0) {
-        printf("Fail at verifyMerkleTree");
+        printf("Fail at verifyMerkleTree\n");
         ret = -1;
         goto Exit;
     }
@@ -1846,7 +1858,7 @@ int verify_blind_picnic3(signature2_t_blind * sig, const uint32_t* blindPubKey, 
     /* Compare to challenge from signature */
     if ( memcmp(sig->challengeHash, challengeHash, params->digestSizeBytes) != 0) {
         PRINT_DEBUG(("Challenge does not match, signature invalid\n"));
-        printf("Fail at created Challenge");
+        printf("Fail at created Challenge\n");
         ret = -1;
         goto Exit;
     }

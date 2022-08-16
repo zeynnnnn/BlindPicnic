@@ -54,7 +54,7 @@ void freeBlindTree(tree_blind_t* tree);
 uint8_t** getBlindLeaves(tree_blind_t* tree);
 /* Get one leaf, leafIndex must be in [0, tree->numLeaves -1] */
 uint8_t* getBlindLeaf(tree_blind_t* tree, size_t leafIndex);
-
+void printLeavesBlind(tree_blind_t* tree);
 /* Functions for trees used to derive seeds.
  *    Signer's usage:   generateSeeds -> revealSeeds -> freeTree
  *    Verifier's usage: createTree -> reconstructSeeds -> freeTree
