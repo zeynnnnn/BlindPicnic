@@ -45,6 +45,24 @@ void freeView(view_t* view)
     free(view->outputShare);
 }
 
+/* Allocate/free functions for dynamically sized types */
+void allocateViewBlind(view_blind_t * view, paramset_t* params)
+{
+    view->inputShare = calloc(params->stateSizeBytes, 1);
+    view->inputBlindShare = calloc(params->stateSizeBytes, 1);
+    view->communicatedBits = calloc(params->andSizeBytes*2, 1);
+    view->outputShare = calloc(params->stateSizeBytes, 1);
+}
+
+void freeViewBlind(view_blind_t* view)
+{
+    free(view->inputShare);
+    free(view->inputBlindShare);
+    free(view->communicatedBits);
+    free(view->outputShare);
+}
+
+
 size_t getTapeSizeBytes(const paramset_t* params)
 {
     return 2*params->andSizeBytes;
@@ -61,6 +79,7 @@ void allocateRandomTape(randomTape_t* tape, paramset_t* params)
         slab += tapeSizeBytes;
     }
     tape->pos = 0;
+
 }
 
 
@@ -72,6 +91,31 @@ void freeRandomTape(randomTape_t* tape)
     }
 }
 
+void allocateRandomTapeBlind(randomTape_t* tape, paramset_t* params)
+{
+
+    tape->nTapes = params->numMPCParties;
+    tape->tape = malloc(tape->nTapes*2 * sizeof(uint8_t*));
+    size_t tapeSizeBytes = getTapeSizeBytes(params);
+    uint8_t* slab = calloc(1, tape->nTapes * tapeSizeBytes);
+    uint8_t* slab2 = calloc(1, tape->nTapes * tapeSizeBytes);
+    for (uint8_t i = 0; i < tape->nTapes; i++) {
+        tape->tape[i] = slab;
+        slab += tapeSizeBytes;
+        tape->tape[i+params->numMPCRounds] = slab2;
+        slab2 += tapeSizeBytes;
+    }
+    tape->pos = 0;
+}
+
+
+void freeRandomTapeBlind(randomTape_t* tape)
+{
+    if (tape != NULL) {
+        free(tape->tape[0]);
+        free(tape->tape);
+    }
+}
 void allocateProof2(proof2_t* proof, paramset_t* params)
 {
     memset(proof, 0, sizeof(proof2_t));
@@ -167,6 +211,61 @@ void freeSignature(signature_t* sig, paramset_t* params)
 {
     for (size_t i = 0; i < params->numMPCRounds; i++) {
         freeProof(&(sig->proofs[i]));
+    }
+
+    free(sig->proofs);
+    free(sig->challengeBits);
+    free(sig->salt);
+}
+
+void allocateBlindProof(proof_blind_t* proof, paramset_t* params)
+{
+    proof->seed1 = malloc(params->seedSizeBytes);
+    proof->seed2 = malloc(params->seedSizeBytes);
+    proof->seed1Second = malloc(params->seedSizeBytes);
+    proof->seed2Second = malloc(params->seedSizeBytes);
+    proof->inputShare = malloc(params->stateSizeBytes);
+    proof->inputBlindShare = malloc(params->stateSizeBytes);
+    proof->communicatedBits = malloc(params->andSizeBytes*2);
+    proof->view3Commitment = malloc(params->digestSizeBytes);
+    if (params->UnruhGWithInputBytes > 0) {
+        proof->view3UnruhG = malloc(params->UnruhGWithInputBytes);
+    }
+    else {
+        proof->view3UnruhG = NULL;
+    }
+}
+
+void freeBlindProof(proof_blind_t* proof)
+{
+    free(proof->seed1);
+    free(proof->seed2);
+    free(proof->seed1Second);
+    free(proof->seed2Second);
+    free(proof->inputShare);
+    free(proof->communicatedBits);
+    free(proof->view3Commitment);
+    free(proof->view3UnruhG);
+
+    free(proof->inputBlindShare);
+}
+
+void allocateBlindSignature(signature_blind_t* sig, paramset_t* params)
+{
+    sig->proofs = (proof_blind_t*)malloc(params->numMPCRounds * sizeof(proof_blind_t));
+
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        allocateBlindProof(&(sig->proofs[i]), params);
+    }
+
+    sig->challengeBits = (uint8_t*)malloc(numBytes(2 * params->numMPCRounds));
+    sig->salt = (uint8_t*)malloc(params->saltSizeBytes);
+}
+
+void freeBlindSignature(signature_blind_t* sig, paramset_t* params)
+{
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        freeBlindProof(&(sig->proofs[i]));
     }
 
     free(sig->proofs);
@@ -271,6 +370,52 @@ seeds_t* allocateSeeds(paramset_t* params)
 }
 
 void freeSeeds(seeds_t* seeds)
+{
+    free(seeds[0].seed[0]); // Frees slab1
+    free(seeds[0].iSeed);   // Frees slab3
+    free(seeds[0].seed);    // frees slab2
+    free(seeds);
+}
+seeds_t* allocateSeedsBlind(paramset_t* params)
+{
+    seeds_t* seeds = malloc((params->numMPCRounds*2 + 1) * sizeof(seeds_t));
+    size_t nSeeds = params->numMPCParties;
+    uint8_t* slab1 = malloc(2*(params->numMPCRounds * nSeeds) * params->seedSizeBytes + params->saltSizeBytes);                                   // Seeds
+    uint8_t* slab2 = malloc(2*params->numMPCRounds * nSeeds * sizeof(uint8_t*) + sizeof(uint8_t*) +2* params->numMPCRounds * sizeof(uint8_t*) );    // pointers to seeds
+    uint8_t* slab3 = malloc(2*(params->numMPCRounds) * params->seedSizeBytes + params->saltSizeBytes);                                            // iSeeds, used to derive seeds
+
+    // We need multiple slabs here, because the seeds are generated with one call to the KDF;
+    // they must be stored contiguously
+
+    for (uint32_t i = 0; i < params->numMPCRounds*2; i++) {
+        seeds[i].seed = (uint8_t**)slab2;
+        slab2 += nSeeds * sizeof(uint8_t*);
+        seeds[i].iSeed = slab3;
+        slab3 += params->seedSizeBytes;
+
+        for (uint32_t j = 0; j < nSeeds; j++) {
+            seeds[i].seed[j] = slab1;
+            slab1 += params->seedSizeBytes;
+        }
+       // printf("I:%d, slab1:%lu\n", i,(uintptr_t)slab1);
+    }
+
+    // The salt is the last seed value
+    // Accessed by seeds[params->numMPCRounds].iSeed
+    //seeds[params->numMPCRounds].seed = NULL;
+    seeds[params->numMPCRounds*2].seed = NULL;
+    if (params->numMPCParties == 3) {
+        seeds[params->numMPCRounds*2].iSeed = slab1;      // For ZKB parameter sets, the salt must be derived with the seeds
+
+    }
+    else {
+        seeds[params->numMPCRounds*2].iSeed = slab3;      // For Pincic2 paramter sets, the salt is dervied with the initial seeds
+    }
+
+    return seeds;
+}
+
+void freeSeedsBlind(seeds_t* seeds)
 {
     free(seeds[0].seed[0]); // Frees slab1
     free(seeds[0].iSeed);   // Frees slab3
@@ -471,6 +616,33 @@ void freeViews(view_t** views, paramset_t* params)
     for (size_t i = 0; i < params->numMPCRounds; i++) {
         for (size_t j = 0; j < 3; j++) {
             freeView(&views[i][j]);
+        }
+        free(views[i]);
+    }
+
+    free(views);
+}
+
+view_blind_t** allocateViewsBlind(paramset_t* params)
+{
+    // 3 views per round
+    view_blind_t** views = malloc(params->numMPCRounds * sizeof(view_blind_t *));
+
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        views[i] = calloc(3, sizeof(view_blind_t));
+        for (size_t j = 0; j < 3; j++) {
+            allocateViewBlind(&views[i][j], params);
+        }
+    }
+
+    return views;
+}
+
+void freeViewsBlind(view_blind_t** views, paramset_t* params)
+{
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        for (size_t j = 0; j < 3; j++) {
+            freeViewBlind(&views[i][j]);
         }
         free(views[i]);
     }

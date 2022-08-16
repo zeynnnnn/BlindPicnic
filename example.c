@@ -11,6 +11,7 @@
  */
 
 #include "picnic.h"
+#include "picnic_impl.h"
 #include <stdio.h>
 #include <memory.h>
 #include <inttypes.h>
@@ -68,7 +69,7 @@ int picnicBlindExample(picnic_params_t parameters)
     fprintf(stdout, "Signing a %d byte message... ", MSG_LEN);
     fflush(stdout);
 
-
+    printHex("General pkBlind.ciphertext :",pkBlind.ciphertext,sizeof(pkBlind.ciphertext));
     ret = picnic_sign_blinded(&sk,nonce, message, sizeof(message), signature, &signature_len);
 
     if (ret != 0) {

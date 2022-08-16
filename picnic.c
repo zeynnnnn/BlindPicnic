@@ -472,30 +472,30 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
 
 
     if (!is_picnic3(sk->params)) {
-        signature_t* sig = (signature_t*)malloc(sizeof(signature_t));
-        allocateSignature(sig, &paramset);
+        signature_blind_t* sig = (signature_blind_t *)malloc(sizeof(signature_blind_t));
+        allocateBlindSignature(sig, &paramset);
         if (sig == NULL) {
             return -1;
         }
 
-        ret = sign_picnic1((uint32_t*)sk->data, (uint32_t*)sk->pk.ciphertext, (uint32_t*)sk->pk.plaintext, message,
+        ret = sign_blind_picnic1((uint32_t*)sk->data,(uint32_t*)skBlind.data, (uint32_t*)sk->pk.ciphertext,(uint32_t*)skBlind.pk.ciphertext, (uint32_t*)sk->pk.plaintext, message,
                            message_len, sig, &paramset);
         if (ret != EXIT_SUCCESS) {
             PRINT_DEBUG(("Failed to create signature\n"));
-            freeSignature(sig, &paramset);
+            freeBlindSignature(sig, &paramset);
             free(sig);
             return -1;
         }
 
-        ret = serializeSignature(sig, signature, *signature_len, &paramset);
+        ret = serializeBlindSignature(sig, signature, *signature_len, &paramset);
         if (ret == -1) {
             PRINT_DEBUG(("Failed to serialize signature\n"));
-            freeSignature(sig, &paramset);
+            freeBlindSignature(sig, &paramset);
             free(sig);
             return -1;
         }
         *signature_len = ret;
-        freeSignature(sig, &paramset);
+        freeBlindSignature(sig, &paramset);
         free(sig);
     }
     else {
@@ -530,7 +530,7 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
     return 0;
 }
 
-size_t picnic_blind_signature_size(picnic_params_t parameters) //TODO
+size_t picnic_blind_signature_size(picnic_params_t parameters)
 {
     paramset_t paramset;
 
@@ -571,14 +571,27 @@ size_t picnic_blind_signature_size(picnic_params_t parameters) //TODO
 
     /* Other paramter sets */
     //TODO
-    // For input blind share 2* lowmcparams.stateSizeBytes
+
     // 2* 2 *numBytes(3 * lowmcparams.numSboxes * lowmcparams.numRounds)
     switch (paramset.transform) {
         case TRANSFORM_FS:
             // This is the largest possible FS signature size and would result when no challenges are 0 -- which would require us to include stateSizeBytes for every ZKB round.
-            return paramset.numMPCRounds * (paramset.digestSizeBytes + paramset.stateSizeBytes + numBytes(3 * paramset.numSboxes * paramset.numRounds) +  2 * paramset.seedSizeBytes) + numBytes(2 * paramset.numMPCRounds) + paramset.saltSizeBytes;
+            return
+                    paramset.numMPCRounds *
+                        (paramset.digestSizeBytes
+                        + paramset.stateSizeBytes *2  //Double size  For input blind share 2* lowmcparams.stateSizeBytes
+                        + numBytes(3 * paramset.numSboxes * paramset.numRounds) *2+ //Double size for communicated bits
+                        2 * paramset.seedSizeBytes*2) //Double size for extra seed
+             + numBytes(2 * paramset.numMPCRounds)
+             + paramset.saltSizeBytes;
         case TRANSFORM_UR:
-            return paramset.numMPCRounds * (paramset.digestSizeBytes + paramset.stateSizeBytes + 2 * numBytes(3 * paramset.numSboxes * paramset.numRounds) +  3 * paramset.seedSizeBytes) + numBytes(2 * paramset.numMPCRounds) + paramset.saltSizeBytes;
+            return paramset.numMPCRounds*
+            (paramset.digestSizeBytes
+            + paramset.stateSizeBytes *2 //Double size  For input blind share 2* lowmcparams.stateSizeBytes
+            + 2 * numBytes(3 * paramset.numSboxes * paramset.numRounds)*2+ //Double size for communicated bits
+             3 * paramset.seedSizeBytes*2)//Double size for extra seed
+            + numBytes(2 * paramset.numMPCRounds)
+            + paramset.saltSizeBytes;
         default:
             return PICNIC_MAX_SIGNATURE_SIZE;
     }
@@ -715,30 +728,30 @@ int picnic_verify_blinded(picnic_publickey_t* pk, const uint8_t* message, size_t
     }
 
     if (!is_picnic3(pk->params)) {
-        signature_t* sig = (signature_t*)malloc(sizeof(signature_t));
-        allocateSignature(sig, &paramset);
+        signature_blind_t* sig = (signature_blind_t*)malloc(sizeof(signature_blind_t));
+        allocateBlindSignature(sig, &paramset);
         if (sig == NULL) {
             return -1;
         }
 
-        ret = deserializeSignature(sig, signature, signature_len, &paramset);
+        ret = deserializeBlindSignature(sig, signature, signature_len, &paramset);
         if (ret != EXIT_SUCCESS) {
             PRINT_DEBUG(("Failed to deserialize signature\n"));
-            freeSignature(sig, &paramset);
+            freeBlindSignature(sig, &paramset);
             free(sig);
             return -1;
         }
 
-        ret = verify(sig, (uint32_t*)pk->ciphertext,
+        ret = verifyBlind(sig, (uint32_t*)pk->ciphertext,
                      (uint32_t*)pk->plaintext, message, message_len, &paramset);
         if (ret != EXIT_SUCCESS) {
             /* Signature is invalid, or verify function failed */
-            freeSignature(sig, &paramset);
+            freeBlindSignature(sig, &paramset);
             free(sig);
             return -1;
         }
 
-        freeSignature(sig, &paramset);
+        freeBlindSignature(sig, &paramset);
         free(sig);
     }
     else {

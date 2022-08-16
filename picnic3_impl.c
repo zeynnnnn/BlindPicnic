@@ -86,7 +86,26 @@ static void createRandomTapes(randomTape_t* tapes, uint8_t** seeds, uint8_t* sal
         HashSqueeze(&ctx, tapes->tape[i], tapeSizeBytes);
     }
 }
+/*
+static void createRandomTapesBlind(randomTape_t* tapes, uint8_t** seeds, uint8_t* salt, size_t t, paramset_t* params)
+{
+    HashInstance ctx;
 
+    size_t tapeSizeBytes = getTapeSizeBytes(params)*2;
+
+    allocateRandomTapeBlind(tapes, params);
+    for (size_t i = 0; i < params->numMPCParties; i++) {
+        HashInit(&ctx, params, HASH_PREFIX_NONE);
+        HashUpdate(&ctx, seeds[i], params->seedSizeBytes);
+        HashUpdate(&ctx, salt, params->saltSizeBytes);
+        HashUpdateIntLE(&ctx, t);
+        HashUpdateIntLE(&ctx, i);
+        HashFinal(&ctx);
+
+        HashSqueeze(&ctx, tapes->tape[i], tapeSizeBytes);
+    }
+}
+ */
 static uint16_t tapesToWord(randomTape_t* tapes)
 {
     uint16_t shares;

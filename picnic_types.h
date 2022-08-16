@@ -29,6 +29,13 @@ typedef struct view_t {
     uint32_t* outputShare;
 } view_t;
 
+typedef struct view_blind_t {
+    uint32_t* inputShare;
+    uint32_t* inputBlindShare;
+    uint8_t* communicatedBits;
+    uint32_t* outputShare;
+} view_blind_t;
+
 typedef struct commitments_t {
     uint8_t** hashes;
     size_t nCommitments;
@@ -66,8 +73,8 @@ void freeView(view_t* view);
 size_t getTapeSizeBytes(const paramset_t* params);
 void allocateRandomTape(randomTape_t* tape, paramset_t* params);
 void freeRandomTape(randomTape_t* tape);
-void allocateBlindRandomTape(randomTape_t* tape, paramset_t* params);
-void freeBlindRandomTape(randomTape_t* tape);
+void allocateRandomTapeBlind(randomTape_t* tape, paramset_t* params);
+void freeRandomTapeBlind(randomTape_t* tape);
 
 void allocateProof(proof_t* proof, paramset_t* params);
 void freeProof(proof_t* proof);
@@ -104,6 +111,16 @@ void freeShares(shares_t* shares);
 
 view_t** allocateViews(paramset_t* params);
 void freeViews(view_t** views, paramset_t* params);
+
+
+seeds_t* allocateSeedsBlind(paramset_t* params);
+void freeSeedsBlind(seeds_t* seeds);
+
+void allocateViewBlind(view_blind_t* view, paramset_t* params);
+void freeViewBlind(view_blind_t* view);
+
+view_blind_t** allocateViewsBlind(paramset_t* params);
+void freeViewsBlind(view_blind_t** views, paramset_t* params);
 
 g_commitments_t* allocateGCommitments(paramset_t* params);
 void freeGCommitments(g_commitments_t* gs);

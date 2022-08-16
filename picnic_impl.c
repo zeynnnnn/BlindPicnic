@@ -259,7 +259,36 @@ bool createRandomTape(const uint8_t* seed, const uint8_t* salt, uint16_t roundNu
 
     return true;
 }
+/*
+bool createRandomTapeBlind(const uint8_t* seed, const uint8_t* salt, uint16_t roundNumber, uint16_t playerNumber,
+                      uint8_t* tape,    uint8_t* tapeSecond, uint32_t tapeLengthBytes, paramset_t* params)
+{
+    HashInstance ctx;
 
+    if (tapeLengthBytes < params->digestSizeBytes) {
+        return false;
+    }
+
+    // Hash the seed and a constant, store the result in tape.
+    HashInit(&ctx, params, HASH_PREFIX_2);
+    HashUpdate(&ctx, seed, params->seedSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, tape, params->digestSizeBytes);
+
+    // Expand the hashed seed, salt, round and player indices, and output
+    // * length to create the tape.
+    HashInit(&ctx, params, HASH_PREFIX_NONE);
+    HashUpdate(&ctx, tape, params->digestSizeBytes);        // Hash the hashed seed
+    HashUpdate(&ctx, salt, params->saltSizeBytes);
+    HashUpdateIntLE(&ctx, roundNumber);
+    HashUpdateIntLE(&ctx, playerNumber);
+    HashUpdateIntLE(&ctx, tapeLengthBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, tape, tapeLengthBytes*2); //Not sure
+
+    return true;
+}
+*/
 void mpc_xor(uint32_t* state[3], uint32_t* in[3], uint32_t len, int players)
 {
     for (uint8_t i = 0; i < players; i++) {
@@ -281,6 +310,15 @@ void mpc_xor_constant_verify(uint32_t* state[2], const uint32_t* in, uint32_t le
     }
     else if (challenge == 2) {
         xor_array(state[1], state[1], in, len);
+    }
+}
+void setStateAccordingToChallenge(uint32_t* state[2],  uint32_t* inState, uint32_t len, uint8_t challenge){
+    /* During verify, where the first share is stored in state depends on the challenge */
+    if (challenge == 0) {
+        xor_array(state[0], state[0], inState, len);
+    }
+    else if (challenge == 2) {
+        xor_array(state[1], state[1], inState, len);
     }
 }
 
@@ -333,6 +371,60 @@ void G(uint8_t viewNumber, const uint8_t* seed, view_t* view, uint8_t* output, p
     HashSqueeze(&ctx, output, outputBytes);
 }
 
+
+void CommitBlind(const uint8_t* seed,const uint8_t* seedSecond,  const view_blind_t view,
+            uint8_t* hash, paramset_t* params)
+{
+    HashInstance ctx;
+
+    /* Hash the seed, store result in `hash` */
+    HashInit(&ctx, params, HASH_PREFIX_4);
+    HashUpdate(&ctx, seed, params->seedSizeBytes);
+    HashUpdate(&ctx, seedSecond, params->seedSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, hash, params->digestSizeBytes);
+
+    /* Compute H_0(H_4(seed), view) */
+    HashInit(&ctx, params, HASH_PREFIX_0);
+    HashUpdate(&ctx, hash, params->digestSizeBytes);
+    HashUpdate(&ctx, (uint8_t*)view.inputShare, params->stateSizeBytes);
+    HashUpdate(&ctx, (uint8_t*)view.inputBlindShare, params->stateSizeBytes);
+    HashUpdate(&ctx, (uint8_t*)view.communicatedBits, params->andSizeBytes*2);
+    HashUpdate(&ctx, (uint8_t*)view.outputShare, params->stateSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, hash, params->digestSizeBytes);
+}
+
+/* This is the random "permuatation" function G for Unruh's transform */
+void GBlind(uint8_t viewNumber, const uint8_t* seed,const uint8_t* seedSecond,  view_blind_t* view, uint8_t* output, paramset_t* params)
+{
+    HashInstance ctx;
+    uint16_t outputBytes = params->seedSizeBytes *2+ params->andSizeBytes*2; //TODO if params->andSizeBytes from communicatedbits
+
+    /* Hash the seed with H_5, store digest in output */
+    HashInit(&ctx, params, HASH_PREFIX_5);
+    HashUpdate(&ctx, seed, params->seedSizeBytes);
+    HashUpdate(&ctx, seedSecond, params->seedSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, output, params->digestSizeBytes);
+
+    /* Hash H_5(seed), the view, and the length */
+    HashInit(&ctx, params, HASH_PREFIX_NONE);
+    HashUpdate(&ctx, output, params->digestSizeBytes);
+    if (viewNumber == 2) {
+        HashUpdate(&ctx, (uint8_t*)view->inputShare, params->stateSizeBytes);
+        outputBytes += (uint16_t)params->stateSizeBytes;
+        HashUpdate(&ctx, (uint8_t*)view->inputBlindShare, params->stateSizeBytes);
+        outputBytes += (uint16_t)params->stateSizeBytes;
+    }
+    HashUpdate(&ctx, view->communicatedBits, params->andSizeBytes*2);
+
+    uint16_t outputBytesLE = toLittleEndian(outputBytes);
+    HashUpdate(&ctx, (uint8_t*)&outputBytesLE, sizeof(uint16_t));
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, output, outputBytes);
+}
+
 void setChallenge(uint8_t* challenge, size_t round, uint8_t trit)
 {
     /* challenge must have length numBytes(numMPCRounds*2)
@@ -356,6 +448,12 @@ void H3(const uint32_t* circuitOutput, const uint32_t* plaintext, uint32_t** vie
         const uint8_t* message, size_t messageByteLength,
         g_commitments_t* gs, paramset_t* params)
 {
+    printf("%s salt", __func__);
+    printHex("", salt, params->saltSizeBytes);
+
+    printf("%s plaintext", __func__);
+    printHex("", (uint8_t*)plaintext, params->stateSizeBytes);
+
     uint8_t* hash = malloc(params->digestSizeBytes);
     HashInstance ctx;
 
@@ -462,7 +560,45 @@ void prove(proof_t* proof, uint8_t challenge, seeds_t* seeds,
         memcpy(proof->view3UnruhG, gs->G[(challenge + 2) % 3], view3UnruhLength);
     }
 }
+void proveBlind(proof_blind_t* proof, uint8_t challenge, seeds_t* seeds, seeds_t* seedsSecond,
+           view_blind_t views[3], commitments_t* commitments, g_commitments_t* gs, paramset_t* params)
+{
 
+    if (challenge == 0) {
+        memcpy(proof->seed1, seeds->seed[0], params->seedSizeBytes);
+        memcpy(proof->seed2, seeds->seed[1], params->seedSizeBytes);
+        memcpy(proof->seed1Second, seedsSecond->seed[0], params->seedSizeBytes);
+        memcpy(proof->seed2Second, seedsSecond->seed[1], params->seedSizeBytes);
+    }
+    else if (challenge == 1) {
+        memcpy(proof->seed1, seeds->seed[1], params->seedSizeBytes);
+        memcpy(proof->seed2, seeds->seed[2], params->seedSizeBytes);
+        memcpy(proof->seed1Second, seedsSecond->seed[1], params->seedSizeBytes);
+        memcpy(proof->seed2Second, seedsSecond->seed[2], params->seedSizeBytes);
+    }
+    else if (challenge == 2) {
+        memcpy(proof->seed1, seeds->seed[2], params->seedSizeBytes);
+        memcpy(proof->seed2, seeds->seed[0], params->seedSizeBytes);
+        memcpy(proof->seed1Second, seedsSecond->seed[2], params->seedSizeBytes);
+        memcpy(proof->seed2Second, seedsSecond->seed[0], params->seedSizeBytes);
+    }
+    else {
+        assert(!"Invalid challenge");
+    }
+
+    if (challenge == 1 || challenge == 2) {
+        memcpy(proof->inputShare, views[2].inputShare, params->stateSizeBytes);
+        memcpy(proof->inputBlindShare, views[2].inputBlindShare, params->stateSizeBytes);
+    }
+    memcpy(proof->communicatedBits, views[(challenge + 1) % 3].communicatedBits, params->andSizeBytes*2);
+
+    memcpy(proof->view3Commitment, commitments->hashes[(challenge + 2) % 3], params->digestSizeBytes);
+    if (params->transform == TRANSFORM_UR) {
+        size_t view3UnruhLength = (challenge == 0) ? params->UnruhGWithInputBytes : params->UnruhGWithoutInputBytes;
+        memcpy(proof->view3UnruhG, gs->G[(challenge + 2) % 3], view3UnruhLength);
+    }
+
+}
 void mpc_AND_verify(uint8_t in1[2], uint8_t in2[2], uint8_t out[2],
                     randomTape_t* rand, view_t* view1, view_t* view2)
 {
@@ -471,6 +607,28 @@ void mpc_AND_verify(uint8_t in1[2], uint8_t in2[2], uint8_t out[2],
     out[0] = (in1[0] & in2[1]) ^ (in1[1] & in2[0]) ^ (in1[0] & in2[0]) ^ r[0] ^ r[1];
     setBit(view1->communicatedBits, rand->pos, out[0]);
     out[1] = getBit(view2->communicatedBits, rand->pos);
+
+    (rand->pos)++;
+}
+void mpc_AND_verifyBlind(uint8_t in1[2], uint8_t in2[2], uint8_t out[2],
+                    randomTape_t* rand, view_blind_t* view1, view_blind_t* view2)
+{
+    uint8_t r[2] = { getBit(rand->tape[0], rand->pos), getBit(rand->tape[1], rand->pos) };
+//printf( "r0:%d r1:%d\n",r[0],r[1]);
+    out[0] = (in1[0] & in2[1]) ^ (in1[1] & in2[0]) ^ (in1[0] & in2[0]) ^ r[0] ^ r[1];
+    setBit(view1->communicatedBits, rand->pos, out[0]);
+    out[1] = getBit(view2->communicatedBits, rand->pos);
+
+    (rand->pos)++;
+}
+void mpc_AND_verifyBlindSpecial(uint8_t in1[2], uint8_t in2[2], uint8_t out[2],
+                         randomTape_t* rand, view_blind_t* view1, view_blind_t* view2,size_t numRounds)
+{
+    uint8_t r[2] = { getBit(rand->tape[0], rand->pos), getBit(rand->tape[1], rand->pos) };
+
+    out[0] = (in1[0] & in2[1]) ^ (in1[1] & in2[0]) ^ (in1[0] & in2[0]) ^ r[0] ^ r[1];
+    setBit(view1->communicatedBits, rand->pos+numRounds, out[0]);
+    out[1] = getBit(view2->communicatedBits, rand->pos+numRounds);
 
     (rand->pos)++;
 }
@@ -506,6 +664,66 @@ void mpc_substitution_verify(uint32_t* state[2], randomTape_t* rand, view_t* vie
     }
 }
 
+void mpc_substitution_verifyBlind(uint32_t* state[2], randomTape_t* rand, view_blind_t* view1,
+                             view_blind_t* view2, paramset_t* params)
+{
+    for (uint32_t i = 0; i < params->numSboxes * 3; i += 3) {
+
+        uint8_t a[2];
+        uint8_t b[2];
+        uint8_t c[2];
+
+        for (uint8_t j = 0; j < 2; j++) {
+            a[j] = getBitFromWordArray(state[j], i + 2);
+            b[j] = getBitFromWordArray(state[j], i + 1);
+            c[j] = getBitFromWordArray(state[j], i);
+        }
+
+        uint8_t ab[2];
+        uint8_t bc[2];
+        uint8_t ca[2];
+
+        mpc_AND_verifyBlind(a, b, ab, rand, view1, view2);
+        mpc_AND_verifyBlind(b, c, bc, rand, view1, view2);
+        mpc_AND_verifyBlind(c, a, ca, rand, view1, view2);
+
+        for (uint8_t j = 0; j < 2; j++) {
+            setBitInWordArray(state[j], i + 2, a[j] ^ (bc[j]));
+            setBitInWordArray(state[j], i + 1, a[j] ^ b[j] ^ (ca[j]));
+            setBitInWordArray(state[j], i, a[j] ^ b[j] ^ c[j] ^ (ab[j]));
+        }
+    }
+}
+void mpc_substitution_verifyBlindSpecial(uint32_t* state[2], randomTape_t* rand, view_blind_t* view1,
+                                  view_blind_t* view2, paramset_t* params)
+{
+    for (uint32_t i = 0; i < params->numSboxes * 3; i += 3) {
+
+        uint8_t a[2];
+        uint8_t b[2];
+        uint8_t c[2];
+
+        for (uint8_t j = 0; j < 2; j++) {
+            a[j] = getBitFromWordArray(state[j], i + 2);
+            b[j] = getBitFromWordArray(state[j], i + 1);
+            c[j] = getBitFromWordArray(state[j], i);
+        }
+
+        uint8_t ab[2];
+        uint8_t bc[2];
+        uint8_t ca[2];
+
+        mpc_AND_verifyBlindSpecial(a, b, ab, rand, view1, view2,params->numRounds);
+        mpc_AND_verifyBlindSpecial(b, c, bc, rand, view1, view2,params->numRounds);
+        mpc_AND_verifyBlindSpecial(c, a, ca, rand, view1, view2,params->numRounds);
+
+        for (uint8_t j = 0; j < 2; j++) {
+            setBitInWordArray(state[j], i + 2, a[j] ^ (bc[j]));
+            setBitInWordArray(state[j], i + 1, a[j] ^ b[j] ^ (ca[j]));
+            setBitInWordArray(state[j], i, a[j] ^ b[j] ^ c[j] ^ (ab[j]));
+        }
+    }
+}
 void mpc_matrix_mul(uint32_t* output[3], uint32_t* state[3], const uint32_t* matrix,
                     paramset_t* params, size_t players)
 {
@@ -547,7 +765,75 @@ void mpc_LowMC_verify(view_t* view1, view_t* view2,
     memcpy(view1->outputShare, state[0], params->stateSizeBytes);
     memcpy(view2->outputShare, state[1], params->stateSizeBytes);
 }
+void mpc_LowMC_verifyBlind(view_blind_t* view1, view_blind_t* view2,
+                      randomTape_t* tapes,randomTape_t* tapesSecond,  uint32_t* tmp,
+                      const uint32_t* plaintext, paramset_t* params, uint8_t challenge,size_t counter)
+{
+    uint32_t* state[2];
+    uint32_t* keyShares[2];
+    uint32_t* roundKey[2];
 
+    memset(tmp, 0, 4 * params->stateSizeWords * sizeof(uint32_t));
+    roundKey[0] = tmp;
+    roundKey[1] = roundKey[0] + params->stateSizeWords;
+    state[0] = roundKey[1] + params->stateSizeWords;
+    state[1] = state[0] + params->stateSizeWords;
+
+    mpc_xor_constant_verify(state, plaintext, params->stateSizeWords, challenge);
+
+    keyShares[0] = view1->inputShare;
+    keyShares[1] = view2->inputShare;
+
+    mpc_matrix_mul(roundKey, keyShares, KMatrix(0, params), params, 2);
+    mpc_xor(state, roundKey, params->stateSizeWords, 2);
+
+    for (uint32_t r = 1; r <= params->numRounds; ++r) {
+        mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 2);
+
+        mpc_substitution_verifyBlind(state, tapes, view1, view2, params);
+        if(counter==1) {
+            printf("Challenge: %d\n",challenge);
+            uint8_t r[2] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos) };
+            printf( "r0:%d r1:%d\n",r[0],r[1]);
+            printHex("view1->communicatedBits",view1->communicatedBits,1);
+            printHex("view2->communicatedBits",view2->communicatedBits,1);
+            printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
+            printHex("mpc_LowMC_verifyBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
+        }
+        mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 2);
+        if(counter==1){
+            printf("After mpc_matrix_mul\n");
+            printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
+            printHex("mpc_LowMC_verifyBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
+
+        }
+        mpc_xor_constant_verify(state, RConstant(r - 1, params), params->stateSizeWords, challenge);
+        mpc_xor(state, roundKey, params->stateSizeWords, 2);
+
+    }
+    //Repeat
+    memset(roundKey[0], 0, 2 * params->stateSizeWords * sizeof(uint32_t));
+   // uint32_t* zeroes[2];
+   // memset(zeroes, 0, 2 * params->stateSizeWords * sizeof(uint32_t));
+   // setStateAccordingToChallenge(zeroes, state, params->stateSizeWords, challenge);
+
+    keyShares[0] = view1->inputBlindShare;
+    keyShares[1] = view2->inputBlindShare;
+
+    mpc_matrix_mul(roundKey, keyShares, KMatrix(0, params), params, 2);
+    mpc_xor(state, roundKey, params->stateSizeWords, 2);
+
+    for (uint32_t r = 1; r <= params->numRounds; ++r) {
+        mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 2);
+        mpc_substitution_verifyBlindSpecial(state, tapesSecond, view1, view2, params);
+        mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 2);
+        mpc_xor_constant_verify(state, RConstant(r - 1, params), params->stateSizeWords, challenge);
+        mpc_xor(state, roundKey, params->stateSizeWords, 2);
+    }
+    //printHex("mpc_LowMC_verifyBlind state[0] :",state[0],params->stateSizeBytes);
+    memcpy(view1->outputShare, state[0], params->stateSizeBytes);
+    memcpy(view2->outputShare, state[1], params->stateSizeBytes);
+}
 void verifyProof(const proof_t* proof, view_t* view1, view_t* view2,
                  uint8_t challenge, uint8_t* salt, uint16_t roundNumber, uint8_t* tmp,
                  const uint32_t* plaintext, randomTape_t* tape, paramset_t* params)
@@ -615,6 +901,103 @@ void verifyProof(const proof_t* proof, view_t* view1, view_t* view2,
     mpc_LowMC_verify(view1, view2, tape, (uint32_t*)tmp, plaintext, params, challenge);
 }
 
+void verifyProofBlind(const proof_blind_t* proof, view_blind_t* view1, view_blind_t* view2,
+                 uint8_t challenge, uint8_t* salt, uint16_t roundNumber, uint8_t* tmp,
+                 const uint32_t* plaintext, randomTape_t* tape, randomTape_t* tapeSecond, paramset_t* params,size_t counter)
+{
+    memcpy(view2->communicatedBits, proof->communicatedBits, params->andSizeBytes*2);
+    tape->pos = 0;
+    tapeSecond->pos=0;
+    bool status = false;
+    switch (challenge) {
+        case 0:
+            // in this case, both views' inputs are derivable from the input share
+            status = createRandomTape(proof->seed1, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            memcpy(view1->inputShare, tmp, params->stateSizeBytes);
+            memcpy(tape->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
+            status = status && createRandomTape(proof->seed2, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            if (!status) {
+                break;
+            }
+            memcpy(view2->inputShare, tmp, params->stateSizeBytes);
+            memcpy(tape->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
+
+
+            status = createRandomTape(proof->seed1Second, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            memcpy(view1->inputBlindShare, tmp, params->stateSizeBytes);
+            memcpy(tapeSecond->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
+            status = status && createRandomTape(proof->seed2Second, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            if (!status) {
+                break;
+            }
+            memcpy(view2->inputBlindShare, tmp, params->stateSizeBytes);
+            memcpy(tapeSecond->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
+
+            break;
+
+        case 1:
+            // in this case view2's input share was already given to us explicitly as
+            // it is not computable from the seed. We just need to compute view1's input from
+            // its seed
+            status = createRandomTape(proof->seed1, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            memcpy(view1->inputShare, tmp, params->stateSizeBytes);
+            memcpy(tape->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
+            status = status && createRandomTape(proof->seed2, salt, roundNumber, 2, tape->tape[1], params->andSizeBytes, params);
+            if (!status) {
+                break;
+            }
+            memcpy(view2->inputShare, proof->inputShare, params->stateSizeBytes);
+
+            status = createRandomTape(proof->seed1Second, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            memcpy(view1->inputBlindShare, tmp, params->stateSizeBytes);
+            memcpy(tapeSecond->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
+            status = status && createRandomTape(proof->seed2Second, salt, roundNumber, 2, tapeSecond->tape[1], params->andSizeBytes, params);
+            if (!status) {
+                break;
+            }
+            memcpy(view2->inputBlindShare, proof->inputBlindShare, params->stateSizeBytes);
+            break;
+
+        case 2:
+            // in this case view1's input share was already given to us explicitly as
+            // it is not computable from the seed. We just need to compute view2's input from
+            // its seed
+            status = createRandomTape(proof->seed1, salt, roundNumber, 2, tape->tape[0], params->andSizeBytes, params);
+            memcpy(view1->inputShare, proof->inputShare, params->stateSizeBytes);
+            status = status && createRandomTape(proof->seed2, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            if (!status) {
+                break;
+            }
+            memcpy(view2->inputShare, tmp, params->stateSizeBytes);
+            memcpy(tape->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
+
+            status = createRandomTape(proof->seed1Second, salt, roundNumber, 2, tapeSecond->tape[0], params->andSizeBytes, params);
+            memcpy(view1->inputBlindShare, proof->inputBlindShare, params->stateSizeBytes);
+            status = status && createRandomTape(proof->seed2Second, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            if (!status) {
+                break;
+            }
+            memcpy(view2->inputBlindShare, tmp, params->stateSizeBytes);
+            memcpy(tapeSecond->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
+            break;
+
+        default:
+            PRINT_DEBUG(("Invalid Challenge"));
+            break;
+    }
+
+    if (!status) {
+        PRINT_DEBUG(("Failed to generate random tapes, signature verification will fail (but signature may actually be valid)\n"));
+    }
+
+    /* When input shares are read from the tapes, and the length is not a whole number of bytes, the trailing bits must be zero */
+    zeroTrailingBits((uint8_t*)view1->inputShare, params->stateSizeBits);
+    zeroTrailingBits((uint8_t*)view1->inputBlindShare, params->stateSizeBits);
+    zeroTrailingBits((uint8_t*)view2->inputShare, params->stateSizeBits);
+    zeroTrailingBits((uint8_t*)view2->inputBlindShare, params->stateSizeBits);
+
+    mpc_LowMC_verifyBlind(view1, view2, tape, tapeSecond,  (uint32_t*)tmp, plaintext, params, challenge,counter);
+}
 int verify(signature_t* sig, const uint32_t* pubKey, const uint32_t* plaintext,
            const uint8_t* message, size_t messageByteLength, paramset_t* params)
 {
@@ -701,6 +1084,98 @@ int verify(signature_t* sig, const uint32_t* pubKey, const uint32_t* plaintext,
     return status;
 }
 
+int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t* plaintext,
+           const uint8_t* message, size_t messageByteLength, paramset_t* params)
+{
+    commitments_t* as = allocateCommitments(params, 0);
+    g_commitments_t* gs = allocateGCommitments(params);
+
+    uint32_t** viewOutputs = malloc(params->numMPCRounds * 3 * sizeof(uint32_t*));
+    const proof_blind_t* proofs = sig->proofs;
+
+    const uint8_t* received_challengebits = sig->challengeBits;
+    int status = EXIT_SUCCESS;
+    uint8_t* computed_challengebits = NULL;
+    uint32_t* view3Slab = NULL;
+
+    uint8_t* tmp = malloc(MAX(6 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
+
+    randomTape_t* tape = (randomTape_t*)malloc(sizeof(randomTape_t));
+    allocateRandomTape(tape, params);
+    randomTape_t* tapeSecond = (randomTape_t*)malloc(sizeof(randomTape_t));
+    allocateRandomTape(tapeSecond, params);
+
+    view_blind_t* view1s = malloc(params->numMPCRounds * sizeof(view_blind_t));
+    view_blind_t* view2s = malloc(params->numMPCRounds * sizeof(view_blind_t));
+
+    /* Allocate a slab of memory for the 3rd view's output in each round */
+    view3Slab = calloc(params->stateSizeBytes, params->numMPCRounds);
+    uint32_t* view3Output = view3Slab;     /* pointer into the slab to the current 3rd view */
+
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        allocateViewBlind(&view1s[i], params);
+        allocateViewBlind(&view2s[i], params);
+
+        verifyProofBlind(&proofs[i], &view1s[i], &view2s[i],
+                    getChallenge(received_challengebits, i), sig->salt, i,
+                    tmp,plaintext, tape,tapeSecond, params,i);
+
+        // create ordered array of commitments with order computed based on the challenge
+        // check commitments of the two opened views
+        uint8_t challenge = getChallenge(received_challengebits, i);
+        CommitBlind(proofs[i].seed1,proofs[i].seed1Second, view1s[i], as[i].hashes[challenge], params);
+        CommitBlind(proofs[i].seed2, proofs[i].seed2Second, view2s[i], as[i].hashes[(challenge + 1) % 3], params);
+        memcpy(as[i].hashes[(challenge + 2) % 3], proofs[i].view3Commitment, params->digestSizeBytes);
+
+        if (params->transform == TRANSFORM_UR) {
+            GBlind(challenge, proofs[i].seed1,  proofs[i].seed1Second, &view1s[i], gs[i].G[challenge], params);
+            GBlind((challenge + 1) % 3, proofs[i].seed2,proofs[i].seed2Second, &view2s[i], gs[i].G[(challenge + 1) % 3], params);
+            size_t view3UnruhLength = (challenge == 0) ? params->UnruhGWithInputBytes : params->UnruhGWithoutInputBytes;
+            memcpy(gs[i].G[(challenge + 2) % 3], proofs[i].view3UnruhG, view3UnruhLength);
+        }
+
+        VIEW_OUTPUTS(i, challenge) = view1s[i].outputShare;
+        VIEW_OUTPUTS(i, (challenge + 1) % 3) = view2s[i].outputShare;
+        xor_three(view3Output, view1s[i].outputShare,  view2s[i].outputShare, pubKey, params->stateSizeBytes);
+        VIEW_OUTPUTS(i, (challenge + 2) % 3) = view3Output;
+        view3Output = (uint32_t*) ((uint8_t*)view3Output + params->stateSizeBytes);
+    }
+
+    computed_challengebits = malloc(numBytes(2 * params->numMPCRounds));
+
+    H3(pubKey, plaintext, viewOutputs, as,
+       computed_challengebits, sig->salt, message, messageByteLength, gs, params);
+
+
+    if (computed_challengebits != NULL &&
+        memcmp(received_challengebits, computed_challengebits, numBytes(2 * params->numMPCRounds)) != 0) {
+        printHex("computed_challengebits",computed_challengebits,numBytes(2 * params->numMPCRounds));
+        printHex("received_challengebits",received_challengebits,numBytes(2 * params->numMPCRounds));
+        printf("Invalid signature. Did not verify\n");
+        status = EXIT_FAILURE;
+    }
+
+    free(computed_challengebits);
+    free(view3Slab);
+
+    freeCommitments(as);
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        freeViewBlind(&view1s[i]);
+        freeViewBlind(&view2s[i]);
+    }
+    free(view1s);
+    free(view2s);
+    free(tmp);
+
+    freeRandomTape(tape);
+    freeRandomTape(tapeSecond);
+    free(tape);
+    free(tapeSecond);
+    freeGCommitments(gs);
+    free(viewOutputs);
+
+    return status;
+}
 /*** Functions implementing Sign ***/
 
 void mpc_AND(uint8_t in1[3], uint8_t in2[3], uint8_t out[3], randomTape_t* rand,
@@ -718,6 +1193,34 @@ void mpc_AND(uint8_t in1[3], uint8_t in2[3], uint8_t out[3], randomTape_t* rand,
     (rand->pos)++;
 }
 
+void mpc_ANDBlind(uint8_t in1[3], uint8_t in2[3], uint8_t out[3], randomTape_t* rand,
+             view_blind_t views[3])
+{
+    uint8_t r[3] = { getBit(rand->tape[0], rand->pos), getBit(rand->tape[1], rand->pos), getBit(rand->tape[2], rand->pos) };
+   // printf( "r0:%d r1:%d  r2:%d\n",r[0],r[1],r[2]);
+    for (uint8_t i = 0; i < 3; i++) {
+        out[i] = (in1[i] & in2[(i + 1) % 3]) ^ (in1[(i + 1) % 3] & in2[i])
+                 ^ (in1[i] & in2[i]) ^ r[i] ^ r[(i + 1) % 3];
+
+        setBit(views[i].communicatedBits, rand->pos, out[i]);
+    }
+
+    (rand->pos)++;
+}
+void mpc_ANDBlindSpecial(uint8_t in1[3], uint8_t in2[3], uint8_t out[3], randomTape_t* rand,
+                  view_blind_t views[3],size_t numRounds)
+{
+    uint8_t r[3] = { getBit(rand->tape[0], rand->pos), getBit(rand->tape[1], rand->pos), getBit(rand->tape[2], rand->pos) };
+
+    for (uint8_t i = 0; i < 3; i++) {
+        out[i] = (in1[i] & in2[(i + 1) % 3]) ^ (in1[(i + 1) % 3] & in2[i])
+                 ^ (in1[i] & in2[i]) ^ r[i] ^ r[(i + 1) % 3];
+
+        setBit(views[i].communicatedBits, rand->pos+numRounds, out[i]);
+    }
+
+    (rand->pos)++;
+}
 void mpc_substitution(uint32_t* state[3], randomTape_t* rand, view_t views[3],
                       paramset_t* params)
 {
@@ -740,6 +1243,68 @@ void mpc_substitution(uint32_t* state[3], randomTape_t* rand, view_t views[3],
         mpc_AND(a, b, ab, rand, views);
         mpc_AND(b, c, bc, rand, views);
         mpc_AND(c, a, ca, rand, views);
+
+        for (uint8_t j = 0; j < 3; j++) {
+            setBitInWordArray(state[j], i + 2, a[j] ^ (bc[j]));
+            setBitInWordArray(state[j], i + 1, a[j] ^ b[j] ^ (ca[j]));
+            setBitInWordArray(state[j], i, a[j] ^ b[j] ^ c[j] ^ (ab[j]));
+        }
+    }
+}
+
+void mpc_substitutionBlind(uint32_t* state[3], randomTape_t* rand, view_blind_t views[3],
+                      paramset_t* params)
+{
+    uint8_t a[3];
+    uint8_t b[3];
+    uint8_t c[3];
+
+    uint8_t ab[3];
+    uint8_t bc[3];
+    uint8_t ca[3];
+
+    for (uint32_t i = 0; i < params->numSboxes * 3; i += 3) {
+
+        for (uint8_t j = 0; j < 3; j++) {
+            a[j] = getBitFromWordArray(state[j], i + 2);
+            b[j] = getBitFromWordArray(state[j], i + 1);
+            c[j] = getBitFromWordArray(state[j], i);
+        }
+
+        mpc_ANDBlind(a, b, ab, rand, views);
+        mpc_ANDBlind(b, c, bc, rand, views);
+        mpc_ANDBlind(c, a, ca, rand, views);
+
+        for (uint8_t j = 0; j < 3; j++) {
+            setBitInWordArray(state[j], i + 2, a[j] ^ (bc[j]));
+            setBitInWordArray(state[j], i + 1, a[j] ^ b[j] ^ (ca[j]));
+            setBitInWordArray(state[j], i, a[j] ^ b[j] ^ c[j] ^ (ab[j]));
+        }
+    }
+}
+
+void mpc_substitutionBlindSpecial(uint32_t* state[3], randomTape_t* rand, view_blind_t views[3],
+                           paramset_t* params)
+{
+    uint8_t a[3];
+    uint8_t b[3];
+    uint8_t c[3];
+
+    uint8_t ab[3];
+    uint8_t bc[3];
+    uint8_t ca[3];
+
+    for (uint32_t i = 0; i < params->numSboxes * 3; i += 3) {
+
+        for (uint8_t j = 0; j < 3; j++) {
+            a[j] = getBitFromWordArray(state[j], i + 2);
+            b[j] = getBitFromWordArray(state[j], i + 1);
+            c[j] = getBitFromWordArray(state[j], i);
+        }
+
+        mpc_ANDBlindSpecial(a, b, ab, rand, views,params->numRounds);
+        mpc_ANDBlindSpecial(b, c, bc, rand, views,params->numRounds);
+        mpc_ANDBlindSpecial(c, a, ca, rand, views,params->numRounds);
 
         for (uint8_t j = 0; j < 3; j++) {
             setBitInWordArray(state[j], i + 2, a[j] ^ (bc[j]));
@@ -799,6 +1364,74 @@ void mpc_LowMC(randomTape_t* tapes, view_t views[3],
     }
 }
 
+void mpc_LowMCBlind(randomTape_t* tapes, randomTape_t* tapesSecond ,view_blind_t views[3],
+               const uint32_t* plaintext, uint32_t* slab, paramset_t* params,size_t counter)
+{
+    uint32_t* keyShares[3];
+    uint32_t* state[3];
+    uint32_t* roundKey[3];
+
+    memset(slab, 0x00, 6 * params->stateSizeWords * sizeof(uint32_t));
+    roundKey[0] = slab;
+    roundKey[1] = slab + params->stateSizeWords;
+    roundKey[2] = roundKey[1] + params->stateSizeWords;
+    state[0] = roundKey[2] + params->stateSizeWords;
+    state[1] = state[0] + params->stateSizeWords;
+    state[2] = state[1] + params->stateSizeWords;
+
+    for (int i = 0; i < 3; i++) {
+        keyShares[i] = views[i].inputShare;
+    }
+    mpc_xor_constant(state, plaintext, params->stateSizeWords);
+    mpc_matrix_mul(roundKey, keyShares, KMatrix(0, params), params, 3);
+    mpc_xor(state, roundKey, params->stateSizeWords, 3);
+
+    for (uint32_t r = 1; r <= params->numRounds; r++) {
+        mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 3);
+        mpc_substitutionBlind(state, tapes, views, params);
+        if(counter==1){
+            uint8_t r[3] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos),getBit(tapes->tape[2], tapes->pos)  };
+            printf( "r0:%d r1:%d r2:%d\n",r[0],r[1],r[2]);
+            printHex("view[0]->communicatedBits",views[0].communicatedBits,1);
+            printHex("view[1]->communicatedBits",views[1].communicatedBits,1);
+            printHex("view[2]->communicatedBits",views[2].communicatedBits,1);
+            printHex("mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
+            printHex("mpc_LowMCBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
+            printHex("mpc_LowMCBlind state[2] :", (const uint8_t *) state[2], params->stateSizeBytes);
+        }
+        mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 3);
+        if(counter==1){
+            printf("After mpc_matrix_mul\n");
+            printHex(" mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
+            printHex("mpc_LowMCBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
+            printHex("mpc_LowMCBlind state[2] :", (const uint8_t *) state[2], params->stateSizeBytes);
+        }
+        mpc_xor_constant(state, RConstant(r - 1, params), params->stateSizeWords);
+        mpc_xor(state, roundKey, params->stateSizeWords, 3);
+
+    }
+
+ memset(roundKey[0] , 0x00, 3 * params->stateSizeWords * sizeof(uint32_t)); //DONT SET STATE TO 0
+    for (int i = 0; i < 3; i++) {
+        keyShares[i] = views[i].inputBlindShare;
+    }
+
+    //mpc_xor_constant(state, plaintext, params->stateSizeWords);
+    mpc_matrix_mul(roundKey, keyShares, KMatrix(0, params), params, 3);
+    mpc_xor(state, roundKey, params->stateSizeWords, 3);
+
+    for (uint32_t r = 1; r <= params->numRounds; r++) {
+        mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 3);
+        mpc_substitutionBlindSpecial(state, tapesSecond, views, params);
+        mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 3);
+        mpc_xor_constant(state, RConstant(r - 1, params), params->stateSizeWords);
+        mpc_xor(state, roundKey, params->stateSizeWords, 3);
+    }
+
+    for (int i = 0; i < 3; i++) {
+        memcpy(views[i].outputShare, state[i], params->stateSizeBytes);
+    }
+}
 #ifdef PICNIC_BUILD_DEFAULT_RNG
 int random_bytes_default(uint8_t* buf, size_t len)
 {
@@ -865,7 +1498,26 @@ seeds_t* computeSeeds(uint32_t* privateKey, uint32_t*
     return allSeeds;
 }
 
+seeds_t* computeSeedsBlind(uint32_t* privateKey, uint32_t*
+publicKey, uint32_t* plaintext, const uint8_t* message, size_t messageByteLength, paramset_t* params)
+{
+    HashInstance ctx;
+    seeds_t* allSeeds = allocateSeedsBlind(params);
 
+
+    HashInit(&ctx, params, HASH_PREFIX_NONE);
+    HashUpdate(&ctx, (uint8_t*)privateKey, params->stateSizeBytes);
+    HashUpdate(&ctx, message, messageByteLength);
+    HashUpdate(&ctx, (uint8_t*)publicKey, params->stateSizeBytes);
+    HashUpdate(&ctx, (uint8_t*)plaintext, params->stateSizeBytes);
+    HashUpdateIntLE(&ctx, params->stateSizeBits);
+    HashFinal(&ctx);
+
+    // Derive the N*T seeds + 1 salt
+    HashSqueeze(&ctx, allSeeds[0].seed[0], params->seedSizeBytes * (params->numMPCParties * params->numMPCRounds)*2 + params->saltSizeBytes); //Double size seeds
+
+    return allSeeds;
+}
 int sign_picnic1(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, const uint8_t* message,
                  size_t messageByteLength, signature_t* sig, paramset_t* params)
 {
@@ -977,6 +1629,136 @@ int sign_picnic1(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, co
     return EXIT_SUCCESS;
 }
 
+
+int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_t* pubKey, uint32_t* blindPubKey,  uint32_t* plaintext,const uint8_t* message, size_t messageByteLength, signature_blind_t *sig, paramset_t* params)
+{
+    bool status;
+
+    /* Allocate views and commitments for all parallel iterations */
+    view_blind_t** views = allocateViewsBlind(params);
+    commitments_t* as = allocateCommitments(params, 0);
+    g_commitments_t* gs = allocateGCommitments(params);
+
+    /* Compute seeds for all parallel iterations */
+    seeds_t* seeds = computeSeedsBlind(privateKey, pubKey, plaintext, message, messageByteLength, params);
+    //seeds_t* seedsSecond = computeSeeds(blindPrivateKey, blindPubKey, plaintext, message, messageByteLength, params);
+    memcpy(sig->salt, seeds[params->numMPCRounds*2].iSeed, params->saltSizeBytes); //Changes the salt to the end of two rounds
+
+    //Allocate a random tape (re-used per parallel iteration), and a temporary buffer
+
+    //randomTape_t tapeSecond;
+    //allocateRandomTapeBlind(&tape, params);
+    randomTape_t tape;
+    randomTape_t tapeSecond;
+    allocateRandomTape(&tape, params);
+    allocateRandomTapeBlind(&tapeSecond, params);
+    uint8_t* tmp = malloc( MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
+    uint8_t* tmp2 = malloc( MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
+    for (uint32_t k = 0; k < params->numMPCRounds; k++) {
+        // for first two players get all tape INCLUDING INPUT SHARE from seed
+        for (int j = 0; j < 2; j++) {
+            status = createRandomTape(seeds[k].seed[j], sig->salt, k, j, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            status = createRandomTape(seeds[k+params->numMPCRounds].seed[j], sig->salt, k, j, tmp2, params->stateSizeBytes + params->andSizeBytes, params);
+            if (!status) {
+                PRINT_DEBUG(("createRandomTape failed \n"));
+                return EXIT_FAILURE;
+            }
+            memcpy(views[k][j].inputShare, tmp, params->stateSizeBytes);
+            zeroTrailingBits((uint8_t*)views[k][j].inputShare, params->stateSizeBits);
+            memcpy(tape.tape[j], tmp + params->stateSizeBytes, params->andSizeBytes);
+
+            memcpy(views[k][j].inputBlindShare, tmp2, params->stateSizeBytes);
+            zeroTrailingBits((uint8_t*)views[k][j].inputBlindShare, params->stateSizeBits);
+            memcpy(tapeSecond.tape[j], tmp2 + params->stateSizeBytes, params->andSizeBytes);
+        }
+
+        // Now set third party's wires. The random bits are from the seed, the input is
+        // the XOR of other two inputs and the private key
+        status = createRandomTape(seeds[k].seed[2], sig->salt, k, 2, tape.tape[2], params->andSizeBytes, params);
+        if (!status) {
+            PRINT_DEBUG(("createRandomTape failed \n"));
+            return EXIT_FAILURE;
+        }
+        status = createRandomTape(seeds[k+params->numMPCRounds].seed[2], sig->salt, k, 2, tapeSecond.tape[2], params->andSizeBytes, params);
+        if (!status) {
+            printf("createRandomTape failed \n");
+            return EXIT_FAILURE;
+        }
+
+        xor_three(views[k][2].inputShare, privateKey, views[k][0].inputShare, views[k][1].inputShare, params->stateSizeBytes);
+        xor_three(views[k][2].inputBlindShare, blindPrivateKey, views[k][0].inputBlindShare, views[k][1].inputBlindShare, params->stateSizeBytes);
+        tape.pos = 0;
+        tapeSecond.pos = 0;
+
+        mpc_LowMCBlind(&tape,&tapeSecond, views[k], plaintext, (uint32_t*)tmp, params,k);
+
+        uint32_t temp[LOWMC_MAX_WORDS] = {0};
+        xor_three(temp, views[k][0].outputShare, views[k][1].outputShare, views[k][2].outputShare, params->stateSizeBytes);
+
+        if(memcmp(temp, blindPubKey, params->stateSizeBytes) != 0) {
+            printf("Simulation failed; output does not match public key (round = %u)\n", k);
+            return EXIT_FAILURE;
+        }
+
+        //Committing
+        CommitBlind(seeds[k].seed[0],seeds[k+params->numMPCRounds].seed[0], views[k][0], as[k].hashes[0], params);
+        CommitBlind(seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[1], views[k][1], as[k].hashes[1], params);
+        CommitBlind(seeds[k].seed[2],seeds[k+params->numMPCRounds].seed[2], views[k][2], as[k].hashes[2], params);
+
+        if (params->transform == TRANSFORM_UR) {
+            GBlind(0, seeds[k].seed[0], seeds[k+params->numMPCRounds].seed[0],&views[k][0], gs[k].G[0], params);
+            GBlind(1, seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[0], &views[k][1], gs[k].G[1], params);
+            GBlind(2, seeds[k].seed[2], seeds[k+params->numMPCRounds].seed[0],&views[k][2], gs[k].G[2], params);
+        }
+    }
+
+    //Generating challenges
+    uint32_t** viewOutputs = malloc(params->numMPCRounds * 3 * sizeof(uint32_t*));
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        for (size_t j = 0; j < 3; j++) {
+            VIEW_OUTPUTS(i, j) = views[i][j].outputShare;
+        }
+    }
+
+    H3(blindPubKey, plaintext, viewOutputs, as,
+       sig->challengeBits, sig->salt, message, messageByteLength, gs, params);
+
+    //Packing Z
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+        proof_blind_t* proof = &sig->proofs[i];
+
+        //printHex("Test",seeds[i+params->numMPCRounds].seed[0],params->seedSizeBytes);
+        proveBlind(proof, getChallenge(sig->challengeBits, i), &seeds[i],&seeds[i+params->numMPCRounds],views[i], &as[i], (gs == NULL) ? NULL : &gs[i], params);
+
+    }
+
+    /* Self-test, verify the signature we just created */
+    printf("\n-----------\n");
+    int ret = verifyBlind(sig, blindPubKey, plaintext, message, messageByteLength, params);
+    if(ret != EXIT_SUCCESS) {
+        printf("Self-test of signature verification failed\n");
+        exit(-1);
+    }
+    else {
+        printf("Self-test succeeded\n");
+    }
+    printf("\n-----------\n");
+
+
+
+    free(tmp);
+    free(tmp2);
+
+    freeViewsBlind(views, params);
+    freeCommitments(as);
+    freeRandomTape(&tape);
+    freeGCommitments(gs);
+    free(viewOutputs);
+    freeSeedsBlind(seeds);
+
+    return EXIT_SUCCESS;
+}
+
 /*** Serialization functions ***/
 
 int serializeSignature(const signature_t* sig, uint8_t* sigBytes, size_t sigBytesLen, paramset_t* params)
@@ -1028,6 +1810,75 @@ int serializeSignature(const signature_t* sig, uint8_t* sigBytes, size_t sigByte
 
         if (challenge == 1 || challenge == 2) {
             memcpy(sigBytes, proofs[i].inputShare, params->stateSizeBytes);
+            sigBytes += params->stateSizeBytes;
+        }
+
+
+    }
+
+    return (int)(sigBytes - sigBytesBase);
+}
+
+int serializeBlindSignature(const signature_blind_t* sig, uint8_t* sigBytes, size_t sigBytesLen, paramset_t* params)
+{
+    const proof_blind_t* proofs = sig->proofs;
+    const uint8_t* challengeBits = sig->challengeBits;
+
+    /* Validate input buffer is large enough */
+    // communicated bits are  params->numAndBytes*2
+    //2 input share
+    // 2 seeds
+    size_t bytesRequired = numBytes(2 * params->numMPCRounds) + params->saltSizeBytes +
+                           params->numMPCRounds * (2*2 * params->seedSizeBytes + params->stateSizeBytes *2+ params->andSizeBytes*2 + params->digestSizeBytes);
+
+    if (params->transform == TRANSFORM_UR) {
+        bytesRequired += params->UnruhGWithoutInputBytes * params->numMPCRounds;
+    }
+
+    if (sigBytesLen < bytesRequired) {
+        printf("Sorry");
+        return -1;
+    }
+
+    uint8_t* sigBytesBase = sigBytes;
+
+    memcpy(sigBytes, challengeBits, numBytes(2 * params->numMPCRounds));
+    sigBytes += numBytes(2 * params->numMPCRounds);
+
+    memcpy(sigBytes, sig->salt, params->saltSizeBytes);
+    sigBytes += params->saltSizeBytes;
+
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+
+        uint8_t challenge = getChallenge(challengeBits, i);
+
+        memcpy(sigBytes, proofs[i].view3Commitment, params->digestSizeBytes);
+        sigBytes += params->digestSizeBytes;
+
+        if (params->transform == TRANSFORM_UR) {
+            size_t view3UnruhLength = (challenge == 0) ? params->UnruhGWithInputBytes : params->UnruhGWithoutInputBytes;
+            memcpy(sigBytes, proofs[i].view3UnruhG, view3UnruhLength);
+            sigBytes += view3UnruhLength;
+        }
+
+        memcpy(sigBytes, proofs[i].communicatedBits, params->andSizeBytes*2);
+        sigBytes += params->andSizeBytes*2;
+
+        memcpy(sigBytes, proofs[i].seed1, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        memcpy(sigBytes, proofs[i].seed2, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+        memcpy(sigBytes, proofs[i].seed1Second, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        memcpy(sigBytes, proofs[i].seed2Second, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        if (challenge == 1 || challenge == 2) {
+            memcpy(sigBytes, proofs[i].inputShare, params->stateSizeBytes);
+            sigBytes += params->stateSizeBytes;
+            memcpy(sigBytes, proofs[i].inputBlindShare, params->stateSizeBytes);
             sigBytes += params->stateSizeBytes;
         }
 
@@ -1145,6 +1996,86 @@ int deserializeSignature(signature_t* sig, const uint8_t* sigBytes,
     return EXIT_SUCCESS;
 }
 
+
+
+
+int deserializeBlindSignature(signature_blind_t* sig, const uint8_t* sigBytes,
+                         size_t sigBytesLen, paramset_t* params)
+{
+    proof_blind_t* proofs = sig->proofs;
+    uint8_t* challengeBits = sig->challengeBits;
+
+    /* Validate input buffer is large enough */
+    if (sigBytesLen < numBytes(2 * params->numMPCRounds)) {     /* ensure the input has at least the challenge */
+        return EXIT_FAILURE;
+    }
+
+    size_t inputShareSize = computeInputShareSize(sigBytes, params->stateSizeBytes, params);
+    size_t bytesExpected = numBytes(2 * params->numMPCRounds) + params->saltSizeBytes +
+                           params->numMPCRounds * (2 * 2* params->seedSizeBytes + params->andSizeBytes*2 + params->digestSizeBytes) + inputShareSize*2;
+
+    if (params->transform == TRANSFORM_UR) {
+        bytesExpected += params->UnruhGWithoutInputBytes * params->numMPCRounds;
+    }
+    if (sigBytesLen < bytesExpected) {
+        return EXIT_FAILURE;
+    }
+
+    memcpy(challengeBits, sigBytes, numBytes(2 * params->numMPCRounds));
+    sigBytes += numBytes(2 * params->numMPCRounds);
+
+    if (!isChallengeValid(challengeBits, params)) {
+        return EXIT_FAILURE;
+    }
+
+    memcpy(sig->salt, sigBytes, params->saltSizeBytes);
+    sigBytes += params->saltSizeBytes;
+
+    for (size_t i = 0; i < params->numMPCRounds; i++) {
+
+        uint8_t challenge = getChallenge(challengeBits, i);
+
+        memcpy(proofs[i].view3Commitment, sigBytes, params->digestSizeBytes);
+        sigBytes += params->digestSizeBytes;
+
+        if (params->transform == TRANSFORM_UR) {
+            size_t view3UnruhLength = (challenge == 0) ? params->UnruhGWithInputBytes : params->UnruhGWithoutInputBytes;
+            memcpy(proofs[i].view3UnruhG, sigBytes, view3UnruhLength);
+            sigBytes += view3UnruhLength;
+        }
+
+        memcpy(proofs[i].communicatedBits, sigBytes, params->andSizeBytes*2);
+        sigBytes += params->andSizeBytes*2;
+
+        memcpy(proofs[i].seed1, sigBytes, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        memcpy(proofs[i].seed2, sigBytes, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        memcpy(proofs[i].seed1Second, sigBytes, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        memcpy(proofs[i].seed2Second, sigBytes, params->seedSizeBytes);
+        sigBytes += params->seedSizeBytes;
+
+        if (challenge == 1 || challenge == 2) {
+            memcpy(proofs[i].inputShare, sigBytes, params->stateSizeBytes);
+            sigBytes += params->stateSizeBytes;
+            if(!arePaddingBitsZero((uint8_t*)proofs[i].inputShare, params->stateSizeBits)) {
+                return EXIT_FAILURE;
+            }
+            memcpy(proofs[i].inputBlindShare, sigBytes, params->stateSizeBytes);
+            sigBytes += params->stateSizeBytes;
+            if(!arePaddingBitsZero((uint8_t*)proofs[i].inputBlindShare, params->stateSizeBits)) {
+                return EXIT_FAILURE;
+            }
+        }
+
+    }
+
+    return EXIT_SUCCESS;
+}
 
 
 

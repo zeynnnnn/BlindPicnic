@@ -66,6 +66,27 @@ typedef struct signature_t {
     uint8_t* salt;              // has length saltSizeBytes
 } signature_t;
 
+typedef struct proof_blind_t {
+    uint8_t* seed1;
+    uint8_t* seed2;
+    uint8_t* seed1Second;
+    uint8_t* seed2Second;
+    uint32_t* inputShare;     // Input share of the party which does not derive it from the seed (not included if challenge is 0)
+    uint8_t* communicatedBits;
+    uint8_t* view3Commitment;
+    uint8_t* view3UnruhG;     // we include the max length, but we will only serialize the bytes we use
+
+    uint32_t* inputBlindShare;
+} proof_blind_t;
+
+typedef struct signature_blind_t {
+
+    uint8_t* challengeBits;     // has length numBytes(numMPCRounds*2)
+    uint8_t* salt;              // has length saltSizeBytes
+    proof_blind_t* proofs;
+  // there are 2 bits per round for the challenge.
+} signature_blind_t;
+
 int sign_picnic1(uint32_t* privateKey, uint32_t* pubKey, uint32_t* plaintext, const uint8_t* message, size_t messageByteLength, signature_t* sig, paramset_t* params);
 int verify(signature_t* sig, const uint32_t* pubKey, const uint32_t* plaintext, const uint8_t* message, size_t messageByteLength, paramset_t* params);
 
@@ -101,5 +122,12 @@ void xor_array(uint32_t* out, const uint32_t * in1, const uint32_t * in2, uint32
 void matrix_mul(uint32_t* output, const uint32_t* state, const uint32_t* matrix, const paramset_t* params);
 int arePaddingBitsZero(uint8_t* data, size_t bitLength);
 void zeroTrailingBits(uint8_t* data, size_t bitLength);
+
+int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_t* pubKey, uint32_t* blindPubKey,  uint32_t* plaintext, const uint8_t* message, size_t messageByteLength, signature_blind_t *sig, paramset_t* params);
+int verifyBlind(signature_blind_t* sig, const uint32_t* pubKey, const uint32_t* pubInput, const uint8_t* message, size_t messageByteLength, paramset_t * params);
+void allocateBlindSignature(signature_blind_t* sig, paramset_t * params);
+void freeBlindSignature(signature_blind_t* sig, paramset_t* params);
+int serializeBlindSignature(const signature_blind_t* sig, uint8_t* sigBytes, size_t sigBytesLen,paramset_t * params);
+int deserializeBlindSignature(signature_blind_t* sig, const uint8_t* sigBytes, size_t sigBytesLen, paramset_t * params);
 
 #endif /* PICNIC_IMPL_H */
