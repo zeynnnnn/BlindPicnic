@@ -69,7 +69,7 @@ int picnicBlindExample(picnic_params_t parameters)
     fprintf(stdout, "Signing a %d byte message... ", MSG_LEN);
     fflush(stdout);
 
-    printHex("General pkBlind.ciphertext :",pkBlind.ciphertext,sizeof(pkBlind.ciphertext));
+    printHex("General pkBlind.ciphertext :",pkBlind.ciphertext,PICNIC_MAX_LOWMC_BLOCK_SIZE);
     ret = picnic_sign_blinded(&sk,nonce, message, sizeof(message), signature, &signature_len);
 
     if (ret != 0) {
@@ -269,7 +269,7 @@ int main(int argc, char** argv)
         picnicBlindExample(atoi(argv[1]));
         return 0;
     }
-
+    //picnicBlindExample(1);
     for (picnic_params_t params = 1; params < PARAMETER_SET_MAX_INDEX; params++) {
         //picnicExample(params);
         picnicBlindExample(params);

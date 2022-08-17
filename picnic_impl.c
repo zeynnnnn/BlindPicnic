@@ -196,6 +196,8 @@ void matrix_mul(
 }
 #endif
 
+
+
 static void substitution(uint32_t* state, paramset_t* params)
 {
     for (uint32_t i = 0; i < params->numSboxes * 3; i += 3) {
@@ -448,11 +450,6 @@ void H3(const uint32_t* circuitOutput, const uint32_t* plaintext, uint32_t** vie
         const uint8_t* message, size_t messageByteLength,
         g_commitments_t* gs, paramset_t* params)
 {
-    printf("%s salt", __func__);
-    printHex("", salt, params->saltSizeBytes);
-
-    printf("%s plaintext", __func__);
-    printHex("", (uint8_t*)plaintext, params->stateSizeBytes);
 
     uint8_t* hash = malloc(params->digestSizeBytes);
     HashInstance ctx;
@@ -594,6 +591,7 @@ void proveBlind(proof_blind_t* proof, uint8_t challenge, seeds_t* seeds, seeds_t
 
     memcpy(proof->view3Commitment, commitments->hashes[(challenge + 2) % 3], params->digestSizeBytes);
     if (params->transform == TRANSFORM_UR) {
+
         size_t view3UnruhLength = (challenge == 0) ? params->UnruhGWithInputBytes : params->UnruhGWithoutInputBytes;
         memcpy(proof->view3UnruhG, gs->G[(challenge + 2) % 3], view3UnruhLength);
     }
@@ -731,7 +729,22 @@ void mpc_matrix_mul(uint32_t* output[3], uint32_t* state[3], const uint32_t* mat
         matrix_mul(output[player], state[player], matrix, params);
     }
 }
+void mpc_matrix_mulTest(uint32_t* output[3], uint32_t* state[3], const uint32_t* matrix,
+                    paramset_t* params, size_t players,bool bol)
+{
 
+    for (uint32_t player = 0; player < players; player++) {
+        matrix_mul(output[players-player-1], state[players-player-1], matrix, params);
+        if (bol){
+
+            for (uint32_t playerC = 0; playerC < players; playerC++) {
+                printf("state[%d]\n",playerC);
+                printHex("mpc_matrix_mulTest state[] :", (const uint8_t *) state[playerC], params->stateSizeBytes);
+            }
+            }
+
+    }
+}
 void mpc_LowMC_verify(view_t* view1, view_t* view2,
                       randomTape_t* tapes, uint32_t* tmp,
                       const uint32_t* plaintext, paramset_t* params, uint8_t challenge)
@@ -766,7 +779,7 @@ void mpc_LowMC_verify(view_t* view1, view_t* view2,
     memcpy(view2->outputShare, state[1], params->stateSizeBytes);
 }
 void mpc_LowMC_verifyBlind(view_blind_t* view1, view_blind_t* view2,
-                      randomTape_t* tapes,randomTape_t* tapesSecond,  uint32_t* tmp,
+                      randomTape_t* tapes, uint32_t* tmp,
                       const uint32_t* plaintext, paramset_t* params, uint8_t challenge,size_t counter)
 {
     uint32_t* state[2];
@@ -786,27 +799,32 @@ void mpc_LowMC_verifyBlind(view_blind_t* view1, view_blind_t* view2,
 
     mpc_matrix_mul(roundKey, keyShares, KMatrix(0, params), params, 2);
     mpc_xor(state, roundKey, params->stateSizeWords, 2);
-
+bool bol=false;
     for (uint32_t r = 1; r <= params->numRounds; ++r) {
         mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 2);
 
         mpc_substitution_verifyBlind(state, tapes, view1, view2, params);
-        if(counter==1) {
+       /* if(counter==2) {
+            bol=true;
             printf("Challenge: %d\n",challenge);
-            uint8_t r[2] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos) };
-            printf( "r0:%d r1:%d\n",r[0],r[1]);
+            uint8_t rT[2] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos) };
+            printf( "r0:%d r1:%d\n",rT[0],rT[1]);
             printHex("view1->communicatedBits",view1->communicatedBits,1);
             printHex("view2->communicatedBits",view2->communicatedBits,1);
             printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
             printHex("mpc_LowMC_verifyBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
+            printHex("LMatrix(r - 1, params):", (const uint8_t *) LMatrix(r - 1, params), params->stateSizeBytes / params->stateSizeWords);
+
         }
-        mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 2);
-        if(counter==1){
+        */
+        mpc_matrix_mulTest(state, state, LMatrix(r - 1, params), params, 2,bol);
+     /*   if(counter==2){
             printf("After mpc_matrix_mul\n");
-            printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
+             printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
             printHex("mpc_LowMC_verifyBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
 
         }
+        */
         mpc_xor_constant_verify(state, RConstant(r - 1, params), params->stateSizeWords, challenge);
         mpc_xor(state, roundKey, params->stateSizeWords, 2);
 
@@ -825,7 +843,7 @@ void mpc_LowMC_verifyBlind(view_blind_t* view1, view_blind_t* view2,
 
     for (uint32_t r = 1; r <= params->numRounds; ++r) {
         mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 2);
-        mpc_substitution_verifyBlindSpecial(state, tapesSecond, view1, view2, params);
+        mpc_substitution_verifyBlind(state, tapes, view1, view2, params);
         mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 2);
         mpc_xor_constant_verify(state, RConstant(r - 1, params), params->stateSizeWords, challenge);
         mpc_xor(state, roundKey, params->stateSizeWords, 2);
@@ -903,35 +921,26 @@ void verifyProof(const proof_t* proof, view_t* view1, view_t* view2,
 
 void verifyProofBlind(const proof_blind_t* proof, view_blind_t* view1, view_blind_t* view2,
                  uint8_t challenge, uint8_t* salt, uint16_t roundNumber, uint8_t* tmp,
-                 const uint32_t* plaintext, randomTape_t* tape, randomTape_t* tapeSecond, paramset_t* params,size_t counter)
+                 const uint32_t* plaintext, randomTape_t* tape, paramset_t* params,size_t counter)
 {
     memcpy(view2->communicatedBits, proof->communicatedBits, params->andSizeBytes*2);
     tape->pos = 0;
-    tapeSecond->pos=0;
     bool status = false;
     switch (challenge) {
         case 0:
             // in this case, both views' inputs are derivable from the input share
-            status = createRandomTape(proof->seed1, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            status = createRandomTape(proof->seed1, salt, roundNumber, 0, tmp, params->stateSizeBytes*2 + params->andSizeBytes*2, params);
             memcpy(view1->inputShare, tmp, params->stateSizeBytes);
-            memcpy(tape->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
-            status = status && createRandomTape(proof->seed2, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            memcpy(view1->inputBlindShare, tmp+params->stateSizeBytes, params->stateSizeBytes);
+            memcpy(tape->tape[0], tmp + params->stateSizeBytes*2, params->andSizeBytes*2);
+            status = status && createRandomTape(proof->seed2, salt, roundNumber, 1, tmp, params->stateSizeBytes*2 + params->andSizeBytes*2, params);
             if (!status) {
                 break;
             }
             memcpy(view2->inputShare, tmp, params->stateSizeBytes);
-            memcpy(tape->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
+            memcpy(view2->inputBlindShare, tmp+params->stateSizeBytes, params->stateSizeBytes);
+            memcpy(tape->tape[1], tmp + params->stateSizeBytes*2, params->andSizeBytes*2);
 
-
-            status = createRandomTape(proof->seed1Second, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
-            memcpy(view1->inputBlindShare, tmp, params->stateSizeBytes);
-            memcpy(tapeSecond->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
-            status = status && createRandomTape(proof->seed2Second, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
-            if (!status) {
-                break;
-            }
-            memcpy(view2->inputBlindShare, tmp, params->stateSizeBytes);
-            memcpy(tapeSecond->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
 
             break;
 
@@ -939,22 +948,15 @@ void verifyProofBlind(const proof_blind_t* proof, view_blind_t* view1, view_blin
             // in this case view2's input share was already given to us explicitly as
             // it is not computable from the seed. We just need to compute view1's input from
             // its seed
-            status = createRandomTape(proof->seed1, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            status = createRandomTape(proof->seed1, salt, roundNumber, 1, tmp, params->stateSizeBytes*2 + params->andSizeBytes*2, params);
             memcpy(view1->inputShare, tmp, params->stateSizeBytes);
-            memcpy(tape->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
-            status = status && createRandomTape(proof->seed2, salt, roundNumber, 2, tape->tape[1], params->andSizeBytes, params);
+            memcpy(view1->inputBlindShare, tmp+ params->stateSizeBytes, params->stateSizeBytes);
+            memcpy(tape->tape[0], tmp + params->stateSizeBytes*2, params->andSizeBytes*2);
+            status = status && createRandomTape(proof->seed2, salt, roundNumber, 2, tape->tape[1], params->andSizeBytes*2, params);
             if (!status) {
                 break;
             }
             memcpy(view2->inputShare, proof->inputShare, params->stateSizeBytes);
-
-            status = createRandomTape(proof->seed1Second, salt, roundNumber, 1, tmp, params->stateSizeBytes + params->andSizeBytes, params);
-            memcpy(view1->inputBlindShare, tmp, params->stateSizeBytes);
-            memcpy(tapeSecond->tape[0], tmp + params->stateSizeBytes, params->andSizeBytes);
-            status = status && createRandomTape(proof->seed2Second, salt, roundNumber, 2, tapeSecond->tape[1], params->andSizeBytes, params);
-            if (!status) {
-                break;
-            }
             memcpy(view2->inputBlindShare, proof->inputBlindShare, params->stateSizeBytes);
             break;
 
@@ -962,23 +964,17 @@ void verifyProofBlind(const proof_blind_t* proof, view_blind_t* view1, view_blin
             // in this case view1's input share was already given to us explicitly as
             // it is not computable from the seed. We just need to compute view2's input from
             // its seed
-            status = createRandomTape(proof->seed1, salt, roundNumber, 2, tape->tape[0], params->andSizeBytes, params);
+            status = createRandomTape(proof->seed1, salt, roundNumber, 2, tape->tape[0], params->andSizeBytes*2, params);
             memcpy(view1->inputShare, proof->inputShare, params->stateSizeBytes);
-            status = status && createRandomTape(proof->seed2, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
+            memcpy(view1->inputBlindShare, proof->inputBlindShare, params->stateSizeBytes);
+            status = status && createRandomTape(proof->seed2, salt, roundNumber, 0, tmp, params->stateSizeBytes *2+ params->andSizeBytes*2, params);
             if (!status) {
                 break;
             }
             memcpy(view2->inputShare, tmp, params->stateSizeBytes);
-            memcpy(tape->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
+            memcpy(view2->inputBlindShare, tmp+params->stateSizeBytes, params->stateSizeBytes);
+            memcpy(tape->tape[1], tmp + params->stateSizeBytes*2, params->andSizeBytes*2);
 
-            status = createRandomTape(proof->seed1Second, salt, roundNumber, 2, tapeSecond->tape[0], params->andSizeBytes, params);
-            memcpy(view1->inputBlindShare, proof->inputBlindShare, params->stateSizeBytes);
-            status = status && createRandomTape(proof->seed2Second, salt, roundNumber, 0, tmp, params->stateSizeBytes + params->andSizeBytes, params);
-            if (!status) {
-                break;
-            }
-            memcpy(view2->inputBlindShare, tmp, params->stateSizeBytes);
-            memcpy(tapeSecond->tape[1], tmp + params->stateSizeBytes, params->andSizeBytes);
             break;
 
         default:
@@ -996,7 +992,7 @@ void verifyProofBlind(const proof_blind_t* proof, view_blind_t* view1, view_blin
     zeroTrailingBits((uint8_t*)view2->inputShare, params->stateSizeBits);
     zeroTrailingBits((uint8_t*)view2->inputBlindShare, params->stateSizeBits);
 
-    mpc_LowMC_verifyBlind(view1, view2, tape, tapeSecond,  (uint32_t*)tmp, plaintext, params, challenge,counter);
+    mpc_LowMC_verifyBlind(view1, view2, tape,  (uint32_t*)tmp, plaintext, params, challenge,counter);
 }
 int verify(signature_t* sig, const uint32_t* pubKey, const uint32_t* plaintext,
            const uint8_t* message, size_t messageByteLength, paramset_t* params)
@@ -1098,12 +1094,11 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
     uint8_t* computed_challengebits = NULL;
     uint32_t* view3Slab = NULL;
 
-    uint8_t* tmp = malloc(MAX(6 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
+    uint8_t* tmp = malloc(2*(MAX(6 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes)));
 
-    randomTape_t* tape = (randomTape_t*)malloc(sizeof(randomTape_t));
-    allocateRandomTape(tape, params);
-    randomTape_t* tapeSecond = (randomTape_t*)malloc(sizeof(randomTape_t));
-    allocateRandomTape(tapeSecond, params);
+    randomTape_t* tape = (randomTape_t*)malloc(sizeof(randomTape_t)*2);
+    allocateRandomTapeBlind(tape, params);
+
 
     view_blind_t* view1s = malloc(params->numMPCRounds * sizeof(view_blind_t));
     view_blind_t* view2s = malloc(params->numMPCRounds * sizeof(view_blind_t));
@@ -1118,7 +1113,7 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
 
         verifyProofBlind(&proofs[i], &view1s[i], &view2s[i],
                     getChallenge(received_challengebits, i), sig->salt, i,
-                    tmp,plaintext, tape,tapeSecond, params,i);
+                    tmp,plaintext, tape, params,i);
 
         // create ordered array of commitments with order computed based on the challenge
         // check commitments of the two opened views
@@ -1168,9 +1163,9 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
     free(tmp);
 
     freeRandomTape(tape);
-    freeRandomTape(tapeSecond);
+
     free(tape);
-    free(tapeSecond);
+
     freeGCommitments(gs);
     free(viewOutputs);
 
@@ -1364,7 +1359,7 @@ void mpc_LowMC(randomTape_t* tapes, view_t views[3],
     }
 }
 
-void mpc_LowMCBlind(randomTape_t* tapes, randomTape_t* tapesSecond ,view_blind_t views[3],
+void mpc_LowMCBlind(randomTape_t* tapes,view_blind_t views[3],
                const uint32_t* plaintext, uint32_t* slab, paramset_t* params,size_t counter)
 {
     uint32_t* keyShares[3];
@@ -1385,27 +1380,32 @@ void mpc_LowMCBlind(randomTape_t* tapes, randomTape_t* tapesSecond ,view_blind_t
     mpc_xor_constant(state, plaintext, params->stateSizeWords);
     mpc_matrix_mul(roundKey, keyShares, KMatrix(0, params), params, 3);
     mpc_xor(state, roundKey, params->stateSizeWords, 3);
-
+    //bool bol=false;
     for (uint32_t r = 1; r <= params->numRounds; r++) {
         mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 3);
         mpc_substitutionBlind(state, tapes, views, params);
-        if(counter==1){
-            uint8_t r[3] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos),getBit(tapes->tape[2], tapes->pos)  };
-            printf( "r0:%d r1:%d r2:%d\n",r[0],r[1],r[2]);
+       /* if(counter==2){
+            bol=true;
+            uint8_t rT[3] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos),getBit(tapes->tape[2], tapes->pos)  };
+            printf( "r0:%d r1:%d r2:%d\n",rT[0],rT[1],rT[2]);
             printHex("view[0]->communicatedBits",views[0].communicatedBits,1);
             printHex("view[1]->communicatedBits",views[1].communicatedBits,1);
             printHex("view[2]->communicatedBits",views[2].communicatedBits,1);
             printHex("mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
             printHex("mpc_LowMCBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
             printHex("mpc_LowMCBlind state[2] :", (const uint8_t *) state[2], params->stateSizeBytes);
+            printHex("LMatrix(r - 1, params):", (const uint8_t *) LMatrix(r - 1, params), params->stateSizeBytes / params->stateSizeWords);
+
         }
+        */
         mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 3);
-        if(counter==1){
+       /* if(counter==2){
             printf("After mpc_matrix_mul\n");
-            printHex(" mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
+           printHex(" mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
             printHex("mpc_LowMCBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
             printHex("mpc_LowMCBlind state[2] :", (const uint8_t *) state[2], params->stateSizeBytes);
         }
+        */
         mpc_xor_constant(state, RConstant(r - 1, params), params->stateSizeWords);
         mpc_xor(state, roundKey, params->stateSizeWords, 3);
 
@@ -1422,7 +1422,7 @@ void mpc_LowMCBlind(randomTape_t* tapes, randomTape_t* tapesSecond ,view_blind_t
 
     for (uint32_t r = 1; r <= params->numRounds; r++) {
         mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 3);
-        mpc_substitutionBlindSpecial(state, tapesSecond, views, params);
+        mpc_substitutionBlind(state, tapes, views, params);
         mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 3);
         mpc_xor_constant(state, RConstant(r - 1, params), params->stateSizeWords);
         mpc_xor(state, roundKey, params->stateSizeWords, 3);
@@ -1646,51 +1646,45 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
 
     //Allocate a random tape (re-used per parallel iteration), and a temporary buffer
 
-    //randomTape_t tapeSecond;
-    //allocateRandomTapeBlind(&tape, params);
+
     randomTape_t tape;
-    randomTape_t tapeSecond;
-    allocateRandomTape(&tape, params);
-    allocateRandomTapeBlind(&tapeSecond, params);
-    uint8_t* tmp = malloc( MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
-    uint8_t* tmp2 = malloc( MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
+    //randomTape_t tapeSecond;
+    allocateRandomTapeBlind(&tape, params);
+
+    uint8_t* tmp = malloc( 2* (MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes)));
+    //uint8_t* tmp2 = malloc( MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
     for (uint32_t k = 0; k < params->numMPCRounds; k++) {
         // for first two players get all tape INCLUDING INPUT SHARE from seed
         for (int j = 0; j < 2; j++) {
-            status = createRandomTape(seeds[k].seed[j], sig->salt, k, j, tmp, params->stateSizeBytes + params->andSizeBytes, params);
-            status = createRandomTape(seeds[k+params->numMPCRounds].seed[j], sig->salt, k, j, tmp2, params->stateSizeBytes + params->andSizeBytes, params);
+            status = createRandomTape(seeds[k].seed[j], sig->salt, k, j, tmp, params->stateSizeBytes *2+ params->andSizeBytes*2, params);
+            //status = createRandomTape(seeds[k+params->numMPCRounds].seed[j], sig->salt, k, j, tmp2, params->stateSizeBytes + params->andSizeBytes, params);
             if (!status) {
                 PRINT_DEBUG(("createRandomTape failed \n"));
                 return EXIT_FAILURE;
             }
             memcpy(views[k][j].inputShare, tmp, params->stateSizeBytes);
             zeroTrailingBits((uint8_t*)views[k][j].inputShare, params->stateSizeBits);
-            memcpy(tape.tape[j], tmp + params->stateSizeBytes, params->andSizeBytes);
-
-            memcpy(views[k][j].inputBlindShare, tmp2, params->stateSizeBytes);
+            memcpy(views[k][j].inputBlindShare, tmp+ params->stateSizeBytes, params->stateSizeBytes);
             zeroTrailingBits((uint8_t*)views[k][j].inputBlindShare, params->stateSizeBits);
-            memcpy(tapeSecond.tape[j], tmp2 + params->stateSizeBytes, params->andSizeBytes);
+
+            memcpy(tape.tape[j], tmp + params->stateSizeBytes*2, params->andSizeBytes*2);
+
         }
 
         // Now set third party's wires. The random bits are from the seed, the input is
         // the XOR of other two inputs and the private key
-        status = createRandomTape(seeds[k].seed[2], sig->salt, k, 2, tape.tape[2], params->andSizeBytes, params);
+        status = createRandomTape(seeds[k].seed[2], sig->salt, k, 2, tape.tape[2], params->andSizeBytes*2, params);
         if (!status) {
             PRINT_DEBUG(("createRandomTape failed \n"));
-            return EXIT_FAILURE;
-        }
-        status = createRandomTape(seeds[k+params->numMPCRounds].seed[2], sig->salt, k, 2, tapeSecond.tape[2], params->andSizeBytes, params);
-        if (!status) {
-            printf("createRandomTape failed \n");
             return EXIT_FAILURE;
         }
 
         xor_three(views[k][2].inputShare, privateKey, views[k][0].inputShare, views[k][1].inputShare, params->stateSizeBytes);
         xor_three(views[k][2].inputBlindShare, blindPrivateKey, views[k][0].inputBlindShare, views[k][1].inputBlindShare, params->stateSizeBytes);
         tape.pos = 0;
-        tapeSecond.pos = 0;
+       // tapeSecond.pos = 0;
 
-        mpc_LowMCBlind(&tape,&tapeSecond, views[k], plaintext, (uint32_t*)tmp, params,k);
+        mpc_LowMCBlind(&tape, views[k], plaintext, (uint32_t*)tmp, params,k);
 
         uint32_t temp[LOWMC_MAX_WORDS] = {0};
         xor_three(temp, views[k][0].outputShare, views[k][1].outputShare, views[k][2].outputShare, params->stateSizeBytes);
@@ -1707,8 +1701,8 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
 
         if (params->transform == TRANSFORM_UR) {
             GBlind(0, seeds[k].seed[0], seeds[k+params->numMPCRounds].seed[0],&views[k][0], gs[k].G[0], params);
-            GBlind(1, seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[0], &views[k][1], gs[k].G[1], params);
-            GBlind(2, seeds[k].seed[2], seeds[k+params->numMPCRounds].seed[0],&views[k][2], gs[k].G[2], params);
+            GBlind(1, seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[1], &views[k][1], gs[k].G[1], params);
+            GBlind(2, seeds[k].seed[2], seeds[k+params->numMPCRounds].seed[2],&views[k][2], gs[k].G[2], params);
         }
     }
 
@@ -1726,12 +1720,13 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
     //Packing Z
     for (size_t i = 0; i < params->numMPCRounds; i++) {
         proof_blind_t* proof = &sig->proofs[i];
-
+//printf("Before proveblind %u\n", getChallenge(sig->challengeBits, i));
         //printHex("Test",seeds[i+params->numMPCRounds].seed[0],params->seedSizeBytes);
-        proveBlind(proof, getChallenge(sig->challengeBits, i), &seeds[i],&seeds[i+params->numMPCRounds],views[i], &as[i], (gs == NULL) ? NULL : &gs[i], params);
+        proveBlind(proof, getChallenge(sig->challengeBits, i), &seeds[i],&seeds[i+params->numMPCRounds],views[i],
+                   &as[i], (gs == NULL) ? NULL : &gs[i], params);
 
     }
-
+#if 0
     /* Self-test, verify the signature we just created */
     printf("\n-----------\n");
     int ret = verifyBlind(sig, blindPubKey, plaintext, message, messageByteLength, params);
@@ -1743,11 +1738,10 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
         printf("Self-test succeeded\n");
     }
     printf("\n-----------\n");
-
+#endif
 
 
     free(tmp);
-    free(tmp2);
 
     freeViewsBlind(views, params);
     freeCommitments(as);

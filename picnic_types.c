@@ -95,15 +95,12 @@ void allocateRandomTapeBlind(randomTape_t* tape, paramset_t* params)
 {
 
     tape->nTapes = params->numMPCParties;
-    tape->tape = malloc(tape->nTapes*2 * sizeof(uint8_t*));
+    tape->tape = malloc(tape->nTapes* sizeof(uint8_t*));
     size_t tapeSizeBytes = getTapeSizeBytes(params);
-    uint8_t* slab = calloc(1, tape->nTapes * tapeSizeBytes);
-    uint8_t* slab2 = calloc(1, tape->nTapes * tapeSizeBytes);
+    uint8_t* slab = calloc(1, tape->nTapes*2 * tapeSizeBytes);
     for (uint8_t i = 0; i < tape->nTapes; i++) {
         tape->tape[i] = slab;
-        slab += tapeSizeBytes;
-        tape->tape[i+params->numMPCRounds] = slab2;
-        slab2 += tapeSizeBytes;
+        slab += tapeSizeBytes*2;
     }
     tape->pos = 0;
 }
@@ -224,6 +221,7 @@ void allocateBlindProof(proof_blind_t* proof, paramset_t* params)
     proof->seed2 = malloc(params->seedSizeBytes);
     proof->seed1Second = malloc(params->seedSizeBytes);
     proof->seed2Second = malloc(params->seedSizeBytes);
+
     proof->inputShare = malloc(params->stateSizeBytes);
     proof->inputBlindShare = malloc(params->stateSizeBytes);
     proof->communicatedBits = malloc(params->andSizeBytes*2);
