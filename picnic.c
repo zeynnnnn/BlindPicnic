@@ -570,7 +570,6 @@ size_t picnic_blind_signature_size(picnic_params_t parameters)
     }
 
     /* Other paramter sets */
-    //TODO
 
     // 2* 2 *numBytes(3 * lowmcparams.numSboxes * lowmcparams.numRounds)
     switch (paramset.transform) {
@@ -581,15 +580,15 @@ size_t picnic_blind_signature_size(picnic_params_t parameters)
                         (paramset.digestSizeBytes
                         + paramset.stateSizeBytes *2  //Double size  For input blind share 2* lowmcparams.stateSizeBytes
                         + numBytes(3 * paramset.numSboxes * paramset.numRounds) *2+ //Double size for communicated bits
-                        2 * paramset.seedSizeBytes*2) //Double size for extra seed
+                        (2*2 )* paramset.seedSizeBytes) //Double size for extra seed
              + numBytes(2 * paramset.numMPCRounds)
              + paramset.saltSizeBytes;
         case TRANSFORM_UR:
             return paramset.numMPCRounds*
             (paramset.digestSizeBytes
             + paramset.stateSizeBytes *2 //Double size  For input blind share 2* lowmcparams.stateSizeBytes
-            + 2 * numBytes(3 * paramset.numSboxes * paramset.numRounds)*2+ //Double size for communicated bits
-             3 * paramset.seedSizeBytes*2)//Double size for extra seed
+            + (1+2) * numBytes(3 * paramset.numSboxes * paramset.numRounds)+ //Double size for communicated bits so add 1
+             (2*3) * paramset.seedSizeBytes)//Double size for extra seed so add 1
             + numBytes(2 * paramset.numMPCRounds)
             + paramset.saltSizeBytes;
         default:

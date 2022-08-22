@@ -401,7 +401,7 @@ void CommitBlind(const uint8_t* seed,const uint8_t* seedSecond,  const view_blin
 void GBlind(uint8_t viewNumber, const uint8_t* seed,const uint8_t* seedSecond,  view_blind_t* view, uint8_t* output, paramset_t* params)
 {
     HashInstance ctx;
-    uint16_t outputBytes = params->seedSizeBytes *2+ params->andSizeBytes*2; //TODO if params->andSizeBytes from communicatedbits
+    uint16_t outputBytes = params->seedSizeBytes + params->andSizeBytes; //TODO not really necessayŕy to double it to get bigger hash?
 
     /* Hash the seed with H_5, store digest in output */
     HashInit(&ctx, params, HASH_PREFIX_5);
@@ -417,7 +417,7 @@ void GBlind(uint8_t viewNumber, const uint8_t* seed,const uint8_t* seedSecond,  
         HashUpdate(&ctx, (uint8_t*)view->inputShare, params->stateSizeBytes);
         outputBytes += (uint16_t)params->stateSizeBytes;
         HashUpdate(&ctx, (uint8_t*)view->inputBlindShare, params->stateSizeBytes);
-        outputBytes += (uint16_t)params->stateSizeBytes;
+        //outputBytes += (uint16_t)params->stateSizeBytes;
     }
     HashUpdate(&ctx, view->communicatedBits, params->andSizeBytes*2);
 
@@ -1063,7 +1063,6 @@ int verify(signature_t* sig, const uint32_t* pubKey, const uint32_t* plaintext,
 
     free(computed_challengebits);
     free(view3Slab);
-
     freeCommitments(as);
     for (size_t i = 0; i < params->numMPCRounds; i++) {
         freeView(&view1s[i]);
@@ -1094,7 +1093,7 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
     uint8_t* computed_challengebits = NULL;
     uint32_t* view3Slab = NULL;
 
-    uint8_t* tmp = malloc(2*(MAX(6 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes)));
+    uint8_t* tmp = malloc((MAX(6 * params->stateSizeBytes, 2*(params->stateSizeBytes + params->andSizeBytes))));
 
     randomTape_t* tape = (randomTape_t*)malloc(sizeof(randomTape_t)*2);
     allocateRandomTapeBlind(tape, params);
@@ -1108,6 +1107,7 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
     uint32_t* view3Output = view3Slab;     /* pointer into the slab to the current 3rd view */
 
     for (size_t i = 0; i < params->numMPCRounds; i++) {
+
         allocateViewBlind(&view1s[i], params);
         allocateViewBlind(&view2s[i], params);
 
@@ -1152,7 +1152,6 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
 
     free(computed_challengebits);
     free(view3Slab);
-
     freeCommitments(as);
     for (size_t i = 0; i < params->numMPCRounds; i++) {
         freeViewBlind(&view1s[i]);
@@ -1161,11 +1160,8 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
     free(view1s);
     free(view2s);
     free(tmp);
-
     freeRandomTape(tape);
-
     free(tape);
-
     freeGCommitments(gs);
     free(viewOutputs);
 
@@ -1641,17 +1637,14 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
 
     /* Compute seeds for all parallel iterations */
     seeds_t* seeds = computeSeedsBlind(privateKey, pubKey, plaintext, message, messageByteLength, params);
-    //seeds_t* seedsSecond = computeSeeds(blindPrivateKey, blindPubKey, plaintext, message, messageByteLength, params);
     memcpy(sig->salt, seeds[params->numMPCRounds*2].iSeed, params->saltSizeBytes); //Changes the salt to the end of two rounds
 
     //Allocate a random tape (re-used per parallel iteration), and a temporary buffer
 
-
     randomTape_t tape;
-    //randomTape_t tapeSecond;
     allocateRandomTapeBlind(&tape, params);
-
-    uint8_t* tmp = malloc( 2* (MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes)));
+    //printf("MAX Result: %u\n",MAX(2*9 * params->stateSizeBytes,2*( params->stateSizeBytes + params->andSizeBytes)));
+    uint8_t* tmp = malloc(  MAX(9 * params->stateSizeBytes,2*( params->stateSizeBytes + params->andSizeBytes)));
     //uint8_t* tmp2 = malloc( MAX(9 * params->stateSizeBytes, params->stateSizeBytes + params->andSizeBytes));
     for (uint32_t k = 0; k < params->numMPCRounds; k++) {
         // for first two players get all tape INCLUDING INPUT SHARE from seed
@@ -1698,11 +1691,12 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
         CommitBlind(seeds[k].seed[0],seeds[k+params->numMPCRounds].seed[0], views[k][0], as[k].hashes[0], params);
         CommitBlind(seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[1], views[k][1], as[k].hashes[1], params);
         CommitBlind(seeds[k].seed[2],seeds[k+params->numMPCRounds].seed[2], views[k][2], as[k].hashes[2], params);
-
         if (params->transform == TRANSFORM_UR) {
+
             GBlind(0, seeds[k].seed[0], seeds[k+params->numMPCRounds].seed[0],&views[k][0], gs[k].G[0], params);
             GBlind(1, seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[1], &views[k][1], gs[k].G[1], params);
             GBlind(2, seeds[k].seed[2], seeds[k+params->numMPCRounds].seed[2],&views[k][2], gs[k].G[2], params);
+
         }
     }
 
@@ -1748,7 +1742,7 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
     freeRandomTape(&tape);
     freeGCommitments(gs);
     free(viewOutputs);
-    freeSeedsBlind(seeds);
+    freeSeeds(seeds);
 
     return EXIT_SUCCESS;
 }

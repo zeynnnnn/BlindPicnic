@@ -413,13 +413,7 @@ seeds_t* allocateSeedsBlind(paramset_t* params)
     return seeds;
 }
 
-void freeSeedsBlind(seeds_t* seeds)
-{
-    free(seeds[0].seed[0]); // Frees slab1
-    free(seeds[0].iSeed);   // Frees slab3
-    free(seeds[0].seed);    // frees slab2
-    free(seeds);
-}
+
 
 commitments_t* allocateCommitments(paramset_t* params, size_t numCommitments)
 {

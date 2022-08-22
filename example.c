@@ -97,7 +97,7 @@ int picnicBlindExample(picnic_params_t parameters)
 
     if (ret != 0) {
         printf("picnic_blind_verify failed\n");
-        //exit(-1);
+        exit(-1);
     }
     printf(" success\n");
 
@@ -120,7 +120,7 @@ int picnicBlindExample(picnic_params_t parameters)
     ret = picnic_verify_blinded(&pkBlind, message, sizeof(message), signature, signature_len);
     if (ret != 0) {
         printf("picnic_verify_blinded failed after de-serializing public key\n");
-        //exit(-1);
+        exit(-1);
     }
     printf(" success\n");
 
@@ -269,7 +269,7 @@ int main(int argc, char** argv)
         picnicBlindExample(atoi(argv[1]));
         return 0;
     }
-    //picnicBlindExample(1);
+   // picnicBlindExample(2);
     for (picnic_params_t params = 1; params < PARAMETER_SET_MAX_INDEX; params++) {
         //picnicExample(params);
         picnicBlindExample(params);
