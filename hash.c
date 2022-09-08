@@ -13,10 +13,16 @@
 #include <stdio.h>
 #include <assert.h>
 #if !defined(SUPERCOP)
-#include "sha3/brg_endian.h"
+    #ifndef _BRG_ENDIAN_H
+    #include "sha3/brg_endian.h"
+    #else
+    #include "brg_endian.h"
+    #endif
 #else
 #include <libkeccak.a.headers/brg_endian.h>
 #endif
+
+#include "brg_endian.h"
 
 void HashUpdate(HashInstance* ctx, const uint8_t* data, size_t byteLen)
 {

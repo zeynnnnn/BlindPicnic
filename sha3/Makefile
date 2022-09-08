@@ -1,5 +1,5 @@
 CC=gcc
-WARNING_FLAGS=-Wall -Wextra -Wpedantic -Werror -Wno-unused-function
+WARNING_FLAGS=-Wall -Wextra -Wpedantic -Werror -Wno-unused-function  -fPIC
 CFLAGS= -O2 -march=native $(WARNING_FLAGS) -std=gnu99 
 
 SOURCES=$(wildcard *.c)

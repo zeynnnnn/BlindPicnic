@@ -240,8 +240,8 @@ int picnic_validate_keypair(const picnic_privatekey_t* privatekey, const picnic_
 /** Parse the signature and print the individual parts. Used when creating test vectors */
 void print_signature(const uint8_t* sigBytes, size_t sigBytesLen, picnic_params_t picnic_params);
 
-int picnic_blind_pk(picnic_params_t parameters,  picnic_privatekey_t* skBlinded, picnic_publickey_t* pk, picnic_publickey_t* pkBlinded,
-                    uint8_t * nonce);
+int picnic_blind_pk(picnic_params_t parameters,  picnic_privatekey_t* skBlinded, picnic_publickey_t* pk, picnic_publickey_t* pkBlinded,   uint8_t * nonce);
+
 int picnic_validate_blind_keypair( const picnic_publickey_t* publickey, const picnic_privatekey_t* skBlind, const picnic_publickey_t* pkBlind);
 int picnic_keygen_blinded(picnic_params_t parameters, picnic_publickey_t* pk,
                           picnic_privatekey_t* privatekey);

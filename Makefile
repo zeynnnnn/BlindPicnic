@@ -1,7 +1,7 @@
 
 CC=gcc
 WARNING_FLAGS=-Wall -Wextra -Wpedantic  -Wshadow
-CFLAGS= -O2 -march=native $(WARNING_FLAGS) -std=gnu99 -D__LINUX__ -D__X64__ -I./sha3
+CFLAGS= -O2 -march=native $(WARNING_FLAGS) -fPIC  -std=gnu99 -D__LINUX__ -D__X64__ -I./sha3
 CFLAGS_DEBUG= -g -march=native $(WARNING_FLAGS) -std=gnu99 -D__LINUX__ -D__X64__ -I./sha3
 NISTKATFLAGS = -Wno-sign-compare -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-result
 SHA3LIB=libshake.a

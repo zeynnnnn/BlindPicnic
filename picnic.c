@@ -282,8 +282,7 @@ int getPicnic_random_bytes( uint8_t* buf, size_t len){
     return 0;
 }
 
-int picnic_blind_pk(picnic_params_t parameters, picnic_privatekey_t* skBlinded, picnic_publickey_t* pk, picnic_publickey_t* pkBlinded,
-                    uint8_t * nonce){
+int picnic_blind_pk(picnic_params_t parameters, picnic_privatekey_t* skBlinded, picnic_publickey_t* pk, picnic_publickey_t* pkBlinded,  uint8_t * nonce){
 
     if (!is_valid_params(parameters)) {
         printf("Invalid parameter set\n");
@@ -312,7 +311,7 @@ int picnic_blind_pk(picnic_params_t parameters, picnic_privatekey_t* skBlinded, 
 /* Generate a private key  from public key pk and nonce */
     skBlinded->params = parameters;
     pkBlinded->params = parameters;
-//KDF to derive new skblind from pk.cipher and nonce
+
     KDF(paramset.stateSizeBytes, pk->ciphertext , nonce, skBlinded->data) ;
     zeroTrailingBits(skBlinded->data, paramset.stateSizeBits);
 
@@ -468,7 +467,7 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
         PRINT_DEBUG(("Failed to initialize parameter set\n"));
         return -1;
     }
-    picnic_blind_pk(sk->params, &skBlind,  &(sk->pk),  &pkBlind, nonce);
+    picnic_blind_pk(sk->params, &skBlind,  &(sk->pk),  &pkBlind,nonce);
 
 
     if (!is_picnic3(sk->params)) {

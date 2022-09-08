@@ -13,16 +13,21 @@
 #define HASH_H
 
 #ifndef SUPERCOP
-#include "sha3/KeccakHash.h"
+    #ifndef _KeccakHashInterface_h_
+    #include "KeccakHash.h"
+    #else
+    #include "sha3/KeccakHash.h"
+    #endif
 #else
 #include <libkeccak.a.headers/KeccakHash.h>
 #endif
 #include "picnic_impl.h"
-
+#include "KeccakHash.h"
 /* Wrap the Keccak API, checking return values, logging errors, and working
  * with byte lengths instead of bitlengths. */
 
 #define MAX_DIGEST_SIZE 64
+
 
 /* Prefix values for domain separation. */
 static const uint8_t HASH_PREFIX_NONE = -1;
