@@ -536,7 +536,7 @@ size_t picnic_blind_signature_size(picnic_params_t parameters)
     int ret = get_param_set(parameters, &paramset);
 
     if (ret != EXIT_SUCCESS) {
-        return PICNIC_MAX_SIGNATURE_SIZE;
+        return PICNIC_MAX_BLIND_SIGNATURE_SIZE;
     }
 
     /* Picnic3 parameter sets */
@@ -586,12 +586,12 @@ size_t picnic_blind_signature_size(picnic_params_t parameters)
             return paramset.numMPCRounds*
             (paramset.digestSizeBytes
             + paramset.stateSizeBytes *2 //Double size  For input blind share 2* lowmcparams.stateSizeBytes
-            + (1+2) * numBytes(3 * paramset.numSboxes * paramset.numRounds)+ //Double size for communicated bits so add 1
-             (2*3) * paramset.seedSizeBytes)//Double size for extra seed so add 1
+            + (1+2) * numBytes(3 * paramset.numSboxes * paramset.numRounds)+ //Double size for communicated bits and 1 fromunruhwithoutinput
+             (2+3) * paramset.seedSizeBytes)//Double size for extra seed so add 1 for proofs[i].seed1, proofs[i].seed2, proofs[i].seed1Second , proofs[i].seed2Second, fromunruhwithoutinput
             + numBytes(2 * paramset.numMPCRounds)
             + paramset.saltSizeBytes;
         default:
-            return PICNIC_MAX_SIGNATURE_SIZE;
+            return PICNIC_MAX_BLIND_SIGNATURE_SIZE;
     }
 }
 size_t picnic_signature_size(picnic_params_t parameters)

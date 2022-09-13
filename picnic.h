@@ -45,6 +45,7 @@ int random_bytes_supercop(uint8_t* buf, size_t len);
 #define PICNIC_MAX_PUBLICKEY_SIZE  (2 * PICNIC_MAX_LOWMC_BLOCK_SIZE + 1)    /**< Largest serialized public key size, in bytes */
 #define PICNIC_MAX_PRIVATEKEY_SIZE (3 * PICNIC_MAX_LOWMC_BLOCK_SIZE + 2)    /**< Largest serialized private key size, in bytes */
 #define PICNIC_MAX_SIGNATURE_SIZE  209522                                   /**< Largest signature size, in bytes */
+#define PICNIC_MAX_BLIND_SIGNATURE_SIZE  314188                                   /**< Largest signature size, in bytes */
 
 /** Parameter set names */
 typedef enum picnic_params_t {
