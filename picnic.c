@@ -342,7 +342,7 @@ int picnic_validate_blind_keypair( const picnic_publickey_t* publickey, const pi
     }
 
     if (skBlind->params != publickey->params) {
-        fprintf(stderr, "Given private blind OR piblic params are not matching\n");
+        fprintf(stderr, "Given private-blind and public picnic-paramaters are not matching\n");
         return -1;
     }
 

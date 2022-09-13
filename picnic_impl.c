@@ -1144,8 +1144,8 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
 
     if (computed_challengebits != NULL &&
         memcmp(received_challengebits, computed_challengebits, numBytes(2 * params->numMPCRounds)) != 0) {
-        printHex("computed_challengebits",computed_challengebits,numBytes(2 * params->numMPCRounds));
-        printHex("received_challengebits",received_challengebits,numBytes(2 * params->numMPCRounds));
+        //printHex("computed_challengebits",computed_challengebits,numBytes(2 * params->numMPCRounds));
+        //printHex("received_challengebits",received_challengebits,numBytes(2 * params->numMPCRounds));
         printf("Invalid signature. Did not verify\n");
         status = EXIT_FAILURE;
     }
