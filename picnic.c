@@ -498,7 +498,7 @@ int picnic_sign_blinded(picnic_privatekey_t* sk,uint8_t * nonce, const uint8_t* 
         free(sig);
     }
     else {
-        printf("Running picnic3\n");
+
         signature2_t_blind * sig = (signature2_t_blind *)malloc(sizeof(signature2_t_blind));
         allocateSignature2Blind(sig, &paramset);
         if (sig == NULL) {
