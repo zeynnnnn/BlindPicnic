@@ -207,10 +207,9 @@ int KDF(uint32_t  stateSizeBytes,uint8_t * pkCiphertext,uint8_t* nonce,  uint8_t
     HashInitBlind(&ctx, stateSizeBytes, HASH_PREFIX_NONE);
     HashUpdate(&ctx, (uint8_t*)pkCiphertext, stateSizeBytes);
     HashUpdate(&ctx, (uint8_t*)nonce, stateSizeBytes);
-    HashUpdate(&ctx, (uint8_t*)skData, stateSizeBytes);
     HashUpdateIntLE(&ctx, stateSizeBytes);
     HashFinal(&ctx);
-    //HashSqueeze(&ctx, saltAndRoot, saltAndRootLength);
+    HashSqueeze(&ctx, skData, stateSizeBytes);
 
 
     return success;

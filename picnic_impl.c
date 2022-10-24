@@ -802,29 +802,8 @@ void mpc_LowMC_verifyBlind(view_blind_t* view1, view_blind_t* view2,
 bool bol=false;
     for (uint32_t r = 1; r <= params->numRounds; ++r) {
         mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 2);
-
         mpc_substitution_verifyBlind(state, tapes, view1, view2, params);
-       /* if(counter==2) {
-            bol=true;
-            printf("Challenge: %d\n",challenge);
-            uint8_t rT[2] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos) };
-            printf( "r0:%d r1:%d\n",rT[0],rT[1]);
-            printHex("view1->communicatedBits",view1->communicatedBits,1);
-            printHex("view2->communicatedBits",view2->communicatedBits,1);
-            printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
-            printHex("mpc_LowMC_verifyBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
-            printHex("LMatrix(r - 1, params):", (const uint8_t *) LMatrix(r - 1, params), params->stateSizeBytes / params->stateSizeWords);
-
-        }
-        */
         mpc_matrix_mulTest(state, state, LMatrix(r - 1, params), params, 2,bol);
-     /*   if(counter==2){
-            printf("After mpc_matrix_mul\n");
-             printHex("mpc_LowMC_verifyBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
-            printHex("mpc_LowMC_verifyBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
-
-        }
-        */
         mpc_xor_constant_verify(state, RConstant(r - 1, params), params->stateSizeWords, challenge);
         mpc_xor(state, roundKey, params->stateSizeWords, 2);
 
@@ -1110,7 +1089,6 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
 
         allocateViewBlind(&view1s[i], params);
         allocateViewBlind(&view2s[i], params);
-
         verifyProofBlind(&proofs[i], &view1s[i], &view2s[i],
                     getChallenge(received_challengebits, i), sig->salt, i,
                     tmp,plaintext, tape, params,i);
@@ -1380,28 +1358,7 @@ void mpc_LowMCBlind(randomTape_t* tapes,view_blind_t views[3],
     for (uint32_t r = 1; r <= params->numRounds; r++) {
         mpc_matrix_mul(roundKey, keyShares, KMatrix(r, params), params, 3);
         mpc_substitutionBlind(state, tapes, views, params);
-       /* if(counter==2){
-            bol=true;
-            uint8_t rT[3] = { getBit(tapes->tape[0], tapes->pos), getBit(tapes->tape[1], tapes->pos),getBit(tapes->tape[2], tapes->pos)  };
-            printf( "r0:%d r1:%d r2:%d\n",rT[0],rT[1],rT[2]);
-            printHex("view[0]->communicatedBits",views[0].communicatedBits,1);
-            printHex("view[1]->communicatedBits",views[1].communicatedBits,1);
-            printHex("view[2]->communicatedBits",views[2].communicatedBits,1);
-            printHex("mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
-            printHex("mpc_LowMCBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
-            printHex("mpc_LowMCBlind state[2] :", (const uint8_t *) state[2], params->stateSizeBytes);
-            printHex("LMatrix(r - 1, params):", (const uint8_t *) LMatrix(r - 1, params), params->stateSizeBytes / params->stateSizeWords);
-
-        }
-        */
         mpc_matrix_mul(state, state, LMatrix(r - 1, params), params, 3);
-       /* if(counter==2){
-            printf("After mpc_matrix_mul\n");
-           printHex(" mpc_LowMCBlind state[0] :", (const uint8_t *) state[0], params->stateSizeBytes);
-            printHex("mpc_LowMCBlind state[1] :", (const uint8_t *) state[1], params->stateSizeBytes);
-            printHex("mpc_LowMCBlind state[2] :", (const uint8_t *) state[2], params->stateSizeBytes);
-        }
-        */
         mpc_xor_constant(state, RConstant(r - 1, params), params->stateSizeWords);
         mpc_xor(state, roundKey, params->stateSizeWords, 3);
 
