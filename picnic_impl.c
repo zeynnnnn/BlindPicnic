@@ -374,15 +374,15 @@ void G(uint8_t viewNumber, const uint8_t* seed, view_t* view, uint8_t* output, p
 }
 
 
-void CommitBlind(const uint8_t* seed,const uint8_t* seedSecond,  const view_blind_t view,
+void CommitBlind(const uint8_t* seed, const view_blind_t view,
             uint8_t* hash, paramset_t* params)
 {
     HashInstance ctx;
 
     /* Hash the seed, store result in `hash` */
     HashInit(&ctx, params, HASH_PREFIX_4);
-    HashUpdate(&ctx, seed, params->seedSizeBytes);
-    HashUpdate(&ctx, seedSecond, params->seedSizeBytes);
+    HashUpdate(&ctx, seed, params->seedSizeBytes*2);
+// HashUpdate(&ctx, seedSecond, params->seedSizeBytes);
     HashFinal(&ctx);
     HashSqueeze(&ctx, hash, params->digestSizeBytes);
 
@@ -398,15 +398,14 @@ void CommitBlind(const uint8_t* seed,const uint8_t* seedSecond,  const view_blin
 }
 
 /* This is the random "permuatation" function G for Unruh's transform */
-void GBlind(uint8_t viewNumber, const uint8_t* seed,const uint8_t* seedSecond,  view_blind_t* view, uint8_t* output, paramset_t* params)
+void GBlind(uint8_t viewNumber, const uint8_t* seed, view_blind_t* view, uint8_t* output, paramset_t* params)
 {
     HashInstance ctx;
     uint16_t outputBytes = params->seedSizeBytes + params->andSizeBytes; //TODO not really necessayŕy to double it to get bigger hash?
 
     /* Hash the seed with H_5, store digest in output */
     HashInit(&ctx, params, HASH_PREFIX_5);
-    HashUpdate(&ctx, seed, params->seedSizeBytes);
-    HashUpdate(&ctx, seedSecond, params->seedSizeBytes);
+    HashUpdate(&ctx, seed, params->seedSizeBytes*2);
     HashFinal(&ctx);
     HashSqueeze(&ctx, output, params->digestSizeBytes);
 
@@ -562,22 +561,16 @@ void proveBlind(proof_blind_t* proof, uint8_t challenge, seeds_t* seeds, seeds_t
 {
 
     if (challenge == 0) {
-        memcpy(proof->seed1, seeds->seed[0], params->seedSizeBytes);
-        memcpy(proof->seed2, seeds->seed[1], params->seedSizeBytes);
-        memcpy(proof->seed1Second, seedsSecond->seed[0], params->seedSizeBytes);
-        memcpy(proof->seed2Second, seedsSecond->seed[1], params->seedSizeBytes);
+        memcpy(proof->seed1, seeds->seed[0], params->seedSizeBytes*2);
+        memcpy(proof->seed2, seeds->seed[1], params->seedSizeBytes*2);
     }
     else if (challenge == 1) {
-        memcpy(proof->seed1, seeds->seed[1], params->seedSizeBytes);
-        memcpy(proof->seed2, seeds->seed[2], params->seedSizeBytes);
-        memcpy(proof->seed1Second, seedsSecond->seed[1], params->seedSizeBytes);
-        memcpy(proof->seed2Second, seedsSecond->seed[2], params->seedSizeBytes);
+        memcpy(proof->seed1, seeds->seed[1], params->seedSizeBytes*2);
+        memcpy(proof->seed2, seeds->seed[2], params->seedSizeBytes*2);
     }
     else if (challenge == 2) {
-        memcpy(proof->seed1, seeds->seed[2], params->seedSizeBytes);
-        memcpy(proof->seed2, seeds->seed[0], params->seedSizeBytes);
-        memcpy(proof->seed1Second, seedsSecond->seed[2], params->seedSizeBytes);
-        memcpy(proof->seed2Second, seedsSecond->seed[0], params->seedSizeBytes);
+        memcpy(proof->seed1, seeds->seed[2], params->seedSizeBytes*2);
+        memcpy(proof->seed2, seeds->seed[0], params->seedSizeBytes*2);
     }
     else {
         assert(!"Invalid challenge");
@@ -1096,13 +1089,13 @@ int verifyBlind(signature_blind_t * sig, const uint32_t* pubKey, const uint32_t*
         // create ordered array of commitments with order computed based on the challenge
         // check commitments of the two opened views
         uint8_t challenge = getChallenge(received_challengebits, i);
-        CommitBlind(proofs[i].seed1,proofs[i].seed1Second, view1s[i], as[i].hashes[challenge], params);
-        CommitBlind(proofs[i].seed2, proofs[i].seed2Second, view2s[i], as[i].hashes[(challenge + 1) % 3], params);
+        CommitBlind(proofs[i].seed1, view1s[i], as[i].hashes[challenge], params);
+        CommitBlind(proofs[i].seed2,  view2s[i], as[i].hashes[(challenge + 1) % 3], params);
         memcpy(as[i].hashes[(challenge + 2) % 3], proofs[i].view3Commitment, params->digestSizeBytes);
 
         if (params->transform == TRANSFORM_UR) {
-            GBlind(challenge, proofs[i].seed1,  proofs[i].seed1Second, &view1s[i], gs[i].G[challenge], params);
-            GBlind((challenge + 1) % 3, proofs[i].seed2,proofs[i].seed2Second, &view2s[i], gs[i].G[(challenge + 1) % 3], params);
+            GBlind(challenge, proofs[i].seed1,   &view1s[i], gs[i].G[challenge], params);
+            GBlind((challenge + 1) % 3, proofs[i].seed2, &view2s[i], gs[i].G[(challenge + 1) % 3], params);
             size_t view3UnruhLength = (challenge == 0) ? params->UnruhGWithInputBytes : params->UnruhGWithoutInputBytes;
             memcpy(gs[i].G[(challenge + 2) % 3], proofs[i].view3UnruhG, view3UnruhLength);
         }
@@ -1645,14 +1638,14 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
         }
 
         //Committing
-        CommitBlind(seeds[k].seed[0],seeds[k+params->numMPCRounds].seed[0], views[k][0], as[k].hashes[0], params);
-        CommitBlind(seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[1], views[k][1], as[k].hashes[1], params);
-        CommitBlind(seeds[k].seed[2],seeds[k+params->numMPCRounds].seed[2], views[k][2], as[k].hashes[2], params);
+        CommitBlind(seeds[k].seed[0], views[k][0], as[k].hashes[0], params);
+        CommitBlind(seeds[k].seed[1], views[k][1], as[k].hashes[1], params);
+        CommitBlind(seeds[k].seed[2], views[k][2], as[k].hashes[2], params);
         if (params->transform == TRANSFORM_UR) {
 
-            GBlind(0, seeds[k].seed[0], seeds[k+params->numMPCRounds].seed[0],&views[k][0], gs[k].G[0], params);
-            GBlind(1, seeds[k].seed[1],seeds[k+params->numMPCRounds].seed[1], &views[k][1], gs[k].G[1], params);
-            GBlind(2, seeds[k].seed[2], seeds[k+params->numMPCRounds].seed[2],&views[k][2], gs[k].G[2], params);
+            GBlind(0, seeds[k].seed[0], &views[k][0], gs[k].G[0], params);
+            GBlind(1, seeds[k].seed[1],&views[k][1], gs[k].G[1], params);
+            GBlind(2, seeds[k].seed[2], &views[k][2], gs[k].G[2], params);
 
         }
     }
@@ -1809,16 +1802,11 @@ int serializeBlindSignature(const signature_blind_t* sig, uint8_t* sigBytes, siz
         memcpy(sigBytes, proofs[i].communicatedBits, params->andSizeBytes*2);
         sigBytes += params->andSizeBytes*2;
 
-        memcpy(sigBytes, proofs[i].seed1, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
+        memcpy(sigBytes, proofs[i].seed1, params->seedSizeBytes*2);
+        sigBytes += params->seedSizeBytes*2;
 
-        memcpy(sigBytes, proofs[i].seed2, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
-        memcpy(sigBytes, proofs[i].seed1Second, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
-
-        memcpy(sigBytes, proofs[i].seed2Second, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
+        memcpy(sigBytes, proofs[i].seed2, params->seedSizeBytes*2);
+        sigBytes += params->seedSizeBytes*2;
 
         if (challenge == 1 || challenge == 2) {
             memcpy(sigBytes, proofs[i].inputShare, params->stateSizeBytes);
@@ -1992,17 +1980,12 @@ int deserializeBlindSignature(signature_blind_t* sig, const uint8_t* sigBytes,
         memcpy(proofs[i].communicatedBits, sigBytes, params->andSizeBytes*2);
         sigBytes += params->andSizeBytes*2;
 
-        memcpy(proofs[i].seed1, sigBytes, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
+        memcpy(proofs[i].seed1, sigBytes, params->seedSizeBytes*2);
+        sigBytes += params->seedSizeBytes*2;
 
-        memcpy(proofs[i].seed2, sigBytes, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
+        memcpy(proofs[i].seed2, sigBytes, params->seedSizeBytes*2);
+        sigBytes += params->seedSizeBytes*2;
 
-        memcpy(proofs[i].seed1Second, sigBytes, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
-
-        memcpy(proofs[i].seed2Second, sigBytes, params->seedSizeBytes);
-        sigBytes += params->seedSizeBytes;
 
         if (challenge == 1 || challenge == 2) {
             memcpy(proofs[i].inputShare, sigBytes, params->stateSizeBytes);

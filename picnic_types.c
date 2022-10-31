@@ -217,11 +217,8 @@ void freeSignature(signature_t* sig, paramset_t* params)
 
 void allocateBlindProof(proof_blind_t* proof, paramset_t* params)
 {
-    proof->seed1 = malloc(params->seedSizeBytes);
-    proof->seed2 = malloc(params->seedSizeBytes);
-    proof->seed1Second = malloc(params->seedSizeBytes);
-    proof->seed2Second = malloc(params->seedSizeBytes);
-
+    proof->seed1 = malloc(params->seedSizeBytes*2);
+    proof->seed2 = malloc(params->seedSizeBytes*2);
     proof->inputShare = malloc(params->stateSizeBytes);
     proof->inputBlindShare = malloc(params->stateSizeBytes);
     proof->communicatedBits = malloc(params->andSizeBytes*2);
@@ -238,8 +235,6 @@ void freeBlindProof(proof_blind_t* proof)
 {
     free(proof->seed1);
     free(proof->seed2);
-    free(proof->seed1Second);
-    free(proof->seed2Second);
     free(proof->inputShare);
     free(proof->communicatedBits);
     free(proof->view3Commitment);

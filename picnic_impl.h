@@ -69,8 +69,6 @@ typedef struct signature_t {
 typedef struct proof_blind_t {
     uint8_t* seed1;
     uint8_t* seed2;
-    uint8_t* seed1Second;
-    uint8_t* seed2Second;
     uint32_t* inputShare;     // Input share of the party which does not derive it from the seed (not included if challenge is 0)
     uint8_t* communicatedBits;
     uint8_t* view3Commitment;
