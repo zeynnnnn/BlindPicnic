@@ -40,22 +40,20 @@ typedef struct signature2_t {
 } signature2_t;
 typedef struct proof2_t_blind {
     uint8_t* seedInfo;          // Information required to compute the tree with seeds of of all opened parties
-    uint8_t* seedInfoSecond;
+
     size_t seedInfoLen;         // Length of seedInfo buffer
     uint8_t* aux;               // Last party's correction bits; NULL if P[t] == N-1
-    uint8_t* auxSecond;
+
     uint8_t* C;                 // Commitment to preprocessing step of unopened party //size  params->digestSizeBytesß
     uint8_t* input;             // Masked input used in online execution // size  params->stateSizeBytes
     uint8_t* inputSecond;
     uint8_t* msgs;              // Broadcast messages of unopened party P[t] //size params->andSizeBytes
-    uint8_t* msgsSecond;
+
 } proof2_t_blind;
 
 typedef struct signature2_t_blind {
     uint8_t* salt;
     uint8_t* iSeedInfo;// Info required to recompute the tree of all initial seeds
-
-    uint8_t* iSeedInfoSecond;         // Info required to recompute the tree of all initial seeds
 
     size_t iSeedInfoLen;
     uint8_t* cvInfo;            // Info required to check commitments to views (reconstruct Merkle tree)

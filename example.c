@@ -268,9 +268,11 @@ int main(int argc, char** argv)
         picnicBlindExample(atoi(argv[1]));
         return 0;
     }
-   // picnicBlindExample(2);
-    for (picnic_params_t params = 1; params < PARAMETER_SET_MAX_INDEX; params++) {
+    //picnicBlindExample(9);
+
+     for (picnic_params_t params = 1; params < PARAMETER_SET_MAX_INDEX; params++) {
         //picnicExample(params);
         picnicBlindExample(params);
     }
+
 }

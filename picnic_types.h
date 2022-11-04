@@ -105,7 +105,7 @@ void freeBlindInputs(inputs_t inputs);
 
 msgs_t* allocateMsgs(paramset_t* params);
 void freeMsgs(msgs_t* msgs);
-msgs_t* allocateBlindMsgs(paramset_t* params);
+msgs_t* allocateMsgsBlind(paramset_t* params);
 shares_t* allocateShares(size_t count);
 void freeShares(shares_t* shares);
 

@@ -556,7 +556,7 @@ void prove(proof_t* proof, uint8_t challenge, seeds_t* seeds,
         memcpy(proof->view3UnruhG, gs->G[(challenge + 2) % 3], view3UnruhLength);
     }
 }
-void proveBlind(proof_blind_t* proof, uint8_t challenge, seeds_t* seeds, seeds_t* seedsSecond,
+void proveBlind(proof_blind_t* proof, uint8_t challenge, seeds_t* seeds,
            view_blind_t views[3], commitments_t* commitments, g_commitments_t* gs, paramset_t* params)
 {
 
@@ -1590,7 +1590,6 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
     memcpy(sig->salt, seeds[params->numMPCRounds*2].iSeed, params->saltSizeBytes); //Changes the salt to the end of two rounds
 
     //Allocate a random tape (re-used per parallel iteration), and a temporary buffer
-
     randomTape_t tape;
     allocateRandomTapeBlind(&tape, params);
     //printf("MAX Result: %u\n",MAX(2*9 * params->stateSizeBytes,2*( params->stateSizeBytes + params->andSizeBytes)));
@@ -1666,7 +1665,7 @@ int sign_blind_picnic1( uint32_t* privateKey, uint32_t* blindPrivateKey, uint32_
         proof_blind_t* proof = &sig->proofs[i];
 //printf("Before proveblind %u\n", getChallenge(sig->challengeBits, i));
         //printHex("Test",seeds[i+params->numMPCRounds].seed[0],params->seedSizeBytes);
-        proveBlind(proof, getChallenge(sig->challengeBits, i), &seeds[i],&seeds[i+params->numMPCRounds],views[i],
+        proveBlind(proof, getChallenge(sig->challengeBits, i), &seeds[i],views[i],
                    &as[i], (gs == NULL) ? NULL : &gs[i], params);
 
     }
