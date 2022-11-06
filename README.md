@@ -1,3 +1,7 @@
+# Picnic Digital Signature Scheme with Key-Blinding
+
+This is the Picnic with key blinding developed on top of the https://github.com/microsoft/Picnic repository as a part of my Master Thesis.  
+
 # Picnic: Post Quantum Signatures 
 
 The Picnic signature scheme is a family of digital signature schemes secure
