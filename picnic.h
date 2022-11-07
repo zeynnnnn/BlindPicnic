@@ -248,6 +248,11 @@ int picnic_keygen_blinded(picnic_params_t parameters, picnic_publickey_t* pk,
                           picnic_privatekey_t* privatekey);
 int KDF(uint32_t  stateSizeBytes,uint8_t * pkCiphertext,uint8_t* nonce,  uint8_t* skData);
 int getPicnic_random_bytes( uint8_t* buf, size_t len);
+int picnic_write_public_key_blind(const picnic_publickey_t* key, uint8_t* buf, size_t buflen);
+int picnic_read_public_key_blind(picnic_publickey_t* key, const uint8_t* buf, size_t buflen);
+int picnic_write_private_key_blind(const picnic_privatekey_t* key, uint8_t* buf, size_t buflen);
+int picnic_read_private_key_blind(picnic_privatekey_t* key, const uint8_t* buf, size_t buflen);
+
 #ifdef __cplusplus
 }
 #endif

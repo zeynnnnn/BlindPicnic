@@ -102,7 +102,8 @@ int picnicBlindExample(picnic_params_t parameters)
 
     printf("Testing public key serialization... ");
     uint8_t pk_buf[PICNIC_MAX_PUBLICKEY_SIZE];
-    ret = picnic_write_public_key(&pk, pk_buf, sizeof(pk_buf));
+    ret = picnic_write_public_key_blind(&pk, pk_buf, sizeof(pk_buf));
+
     if (ret <= 0) {
         printf("Failed to serialize public key\n");
         exit(-1);
@@ -110,7 +111,7 @@ int picnicBlindExample(picnic_params_t parameters)
 
     memset(&pk, 0x00, sizeof(picnic_publickey_t));
 
-    ret = picnic_read_public_key(&pk, pk_buf, sizeof(pk_buf));
+    ret = picnic_read_public_key_blind(&pk, pk_buf, sizeof(pk_buf));
     if (ret != 0) {
         printf("Failed to read public key\n");
         exit(-1);
@@ -125,14 +126,14 @@ int picnicBlindExample(picnic_params_t parameters)
 
     printf("Testing private key serialization... ");
     uint8_t sk_buf[PICNIC_MAX_PRIVATEKEY_SIZE];
-    ret = picnic_write_private_key(&sk, sk_buf, sizeof(sk_buf));
+    ret = picnic_write_private_key_blind(&sk, sk_buf, sizeof(sk_buf));
     if (ret <= 0) {
         printf("Failed to write private key\n");
         exit(-1);
     }
 
     memset(&sk, 0x00, sizeof(picnic_privatekey_t));
-    ret = picnic_read_private_key(&sk, sk_buf, sizeof(sk_buf));
+    ret = picnic_read_private_key_blind(&sk, sk_buf, sizeof(sk_buf));
     if (ret != 0) {
         printf("Failed to read private key\n");
         exit(-1);

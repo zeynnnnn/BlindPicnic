@@ -270,8 +270,57 @@ int picnic_keygen(picnic_params_t parameters, picnic_publickey_t* pk,
 }
 
 int picnic_keygen_blinded(picnic_params_t parameters, picnic_publickey_t* pk,
-                          picnic_privatekey_t* privatekey){
-    return picnic_keygen(parameters, pk, privatekey);
+                          picnic_privatekey_t* sk){
+    if (!is_valid_params(parameters)) {
+        PRINT_DEBUG(("Invalid parameter set\n"));
+        return -1;
+    }
+
+    if (pk == NULL) {
+        PRINT_DEBUG(("public key is NULL\n"));
+        return -1;
+    }
+
+    if (sk == NULL) {
+        PRINT_DEBUG(("private key is NULL\n"));
+        return -1;
+    }
+
+    memset(pk, 0x00, sizeof(picnic_publickey_t));
+    memset(sk, 0x00, sizeof(picnic_privatekey_t));
+
+    paramset_t paramset;
+    int ret = get_param_set(parameters, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize parameter set\n"));
+        return -1;
+    }
+    sk->params = parameters;
+    pk->params = parameters;
+
+    /* Generate a private key */
+    if (picnic_random_bytes(sk->data, paramset.stateSizeBytes) != 0) {
+        PRINT_DEBUG(("Failed to generate private key\n"));
+        return -1;
+    }
+    zeroTrailingBits(sk->data, paramset.stateSizeBits);
+
+    /* Generate a fixed plaintext block */
+    HashInstance ctx;
+    HashInitBlind(&ctx, paramset.stateSizeBytes, HASH_PREFIX_NONE);
+    HashUpdateIntLE(&ctx, paramset.stateSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx, pk->plaintext, paramset.stateSizeBytes);
+    zeroTrailingBits(pk->plaintext, paramset.stateSizeBits);
+
+    /* Compute the ciphertext */
+    LowMCEnc((uint32_t*)pk->plaintext, (uint32_t*)pk->ciphertext,
+             (uint32_t*)sk->data, &paramset);
+
+    /* Make of copy of the public key in the private key */
+    memcpy(&(sk->pk), pk, sizeof(picnic_publickey_t));
+
+    return 0;
 }
 int getPicnic_random_bytes( uint8_t* buf, size_t len){
     if (picnic_random_bytes(buf,len)!= 0) {
@@ -849,6 +898,77 @@ int picnic_read_public_key(picnic_publickey_t* key, const uint8_t* buf, size_t b
     return 0;
 }
 
+/* Serialize public key */
+int picnic_write_public_key_blind(const picnic_publickey_t* key, uint8_t* buf, size_t buflen)
+{
+    if (key == NULL || buf == NULL) {
+        printf("key == NULL || buf == NULL");
+        return -1;
+    }
+
+    paramset_t paramset;
+    int ret = get_param_set(key->params, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize parameter set\n"));
+        return -1;
+    }
+
+    size_t keySizeBytes = paramset.stateSizeBytes;
+    size_t bytesRequired = 1 +  keySizeBytes;
+    if (buflen < bytesRequired) {
+        return -1;
+    }
+
+    buf[0] = (uint8_t)key->params;
+
+    memcpy(buf + 1, key->ciphertext, keySizeBytes);
+
+    return (int)bytesRequired;
+}
+
+int picnic_read_public_key_blind(picnic_publickey_t* key, const uint8_t* buf, size_t buflen)
+{
+    if (key == NULL || buf == NULL) {
+        return -1;
+    }
+
+    if (buflen < 1 || !is_valid_params(buf[0])) {
+        return -1;
+    }
+
+    key->params = buf[0];
+
+    paramset_t paramset;
+    int ret = get_param_set(key->params, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize parameter set\n"));
+        return -1;
+    }
+
+    size_t keySizeBytes = paramset.stateSizeBytes;
+    size_t bytesExpected = 1 +  keySizeBytes;
+    if (buflen < bytesExpected) {
+        return -1;
+    }
+
+    memcpy(key->ciphertext, buf + 1, keySizeBytes);
+
+    HashInstance ctx;
+    HashInitBlind(&ctx, paramset.stateSizeBytes, HASH_PREFIX_NONE);
+    HashUpdateIntLE(&ctx, paramset.stateSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx,key->plaintext, paramset.stateSizeBytes);
+    zeroTrailingBits(key->plaintext, paramset.stateSizeBits);
+
+
+    if(!arePaddingBitsZero(key->ciphertext, paramset.stateSizeBits) ||
+       !arePaddingBitsZero(key->plaintext, paramset.stateSizeBits) ) {
+        return -1;
+    }
+
+    return 0;
+}
+
 /* Serialize a private key. */
 int picnic_write_private_key(const picnic_privatekey_t* key, uint8_t* buf, size_t buflen)
 {
@@ -920,7 +1040,89 @@ int picnic_read_private_key(picnic_privatekey_t* key, const uint8_t* buf, size_t
 
     return 0;
 }
+/* Serialize a private key. */
+int picnic_write_private_key_blind(const picnic_privatekey_t* key, uint8_t* buf, size_t buflen)
+{
+    if (key == NULL || buf == NULL) {
+        return -1;
+    }
 
+    paramset_t paramset;
+    int ret = get_param_set(key->params, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize paramset set\n"));
+        return -1;
+    }
+
+    size_t n = paramset.stateSizeBytes;
+    size_t bytesRequired = 1 + 3 * n;
+    if (buflen < bytesRequired) {
+        PRINT_DEBUG(("buffer provided has %u bytes, but %u are required.\n", (uint32_t)buflen, (uint32_t)bytesRequired));
+        return -1;
+    }
+
+    buf[0] = (uint8_t)key->params;
+
+    memcpy(buf + 1, key->data, n);
+    memcpy(buf + 1 + n, key->pk.ciphertext, n);
+
+    HashInstance ctx;
+    HashInitBlind(&ctx, paramset.stateSizeBytes, HASH_PREFIX_NONE);
+    HashUpdateIntLE(&ctx, paramset.stateSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx,buf + 1 + 2 * n, paramset.stateSizeBytes);
+    zeroTrailingBits(buf + 1 + 2 * n, paramset.stateSizeBits);
+
+    return (int)bytesRequired;
+}
+
+
+/* De-serialize a private key. */
+int picnic_read_private_key_blind(picnic_privatekey_t* key, const uint8_t* buf, size_t buflen)
+{
+    if (key == NULL || buf == NULL) {
+        return -1;
+    }
+
+    if (buflen < 1 || !is_valid_params(buf[0])) {
+        return -1;
+    }
+
+    memset(key, 0x00, sizeof(picnic_privatekey_t));
+
+    key->params = buf[0];
+    key->pk.params = buf[0];
+
+    paramset_t paramset;
+    int ret = get_param_set(key->params, &paramset);
+    if (ret != EXIT_SUCCESS) {
+        PRINT_DEBUG(("Failed to initialize paramset set\n"));
+        return -1;
+    }
+
+    size_t n = paramset.stateSizeBytes;
+    size_t bytesExpected = 1 + 3 * n;
+    if (buflen < bytesExpected) {
+        return -1;
+    }
+
+    memcpy(key->data, buf + 1, n);
+    memcpy(key->pk.ciphertext, buf + 1 + n, n);
+    HashInstance ctx;
+    HashInitBlind(&ctx, paramset.stateSizeBytes, HASH_PREFIX_NONE);
+    HashUpdateIntLE(&ctx, paramset.stateSizeBytes);
+    HashFinal(&ctx);
+    HashSqueeze(&ctx,key->pk.plaintext, paramset.stateSizeBytes);
+    zeroTrailingBits(key->pk.plaintext, paramset.stateSizeBits);
+
+    if(!arePaddingBitsZero(key->data, paramset.stateSizeBits) ||
+       !arePaddingBitsZero(key->pk.ciphertext, paramset.stateSizeBits) ||
+       !arePaddingBitsZero(key->pk.plaintext, paramset.stateSizeBits) ) {
+        return -1;
+    }
+
+    return 0;
+}
 /* Check that a key pair is valid. */
 int picnic_validate_keypair(const picnic_privatekey_t* privatekey, const picnic_publickey_t* publickey)
 {
